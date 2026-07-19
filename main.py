@@ -8,7 +8,7 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 # Tu Token de Whapi configurado de forma segura
-WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
+WHAPI_TOKEN = "Cg2jobsnGJdDRFU133QJWSPPwABdNCBP" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
 # 🔑 ID DE RESPALDO DE TU GRUPO
