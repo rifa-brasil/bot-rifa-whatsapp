@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+import re
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -36,7 +37,6 @@ def generar_texto_lista():
             texto += f"🟢 *{num_str}*: Disponible\n"
             disponibles += 1
         else:
-            # SOLUCIÓN: Si tiene el campo 'enlace' lo usa; si no lo tiene, limpia el teléfono y genera el link wa.me en vivo
             if info.get("enlace"):
                 link = info["enlace"]
             elif info.get("telefono"):
@@ -91,10 +91,25 @@ def webhook():
     chat_id = msg.get("chat_id", "")
     sender_id = msg.get("sender_id", "")
     
-    # Extraemos el número de teléfono limpio
-    numero_persona = sender_id.split("@")[0] if "@" in sender_id else sender_id
-    if not numero_persona:
-        numero_persona = chat_id.split("@")[0] if "@" in chat_id else chat_id
+    # Tomamos el identificador del emisor
+    raw_sender = sender_id if sender_id else chat_id
+    
+    # 1. Quitamos el @g.us o @c.us si viene incluido
+    id_antes_del_arroba = raw_sender.split("@")[0]
+    
+    # 2. Si Whapi junta el ID del grupo y el del usuario con un guion (ej: 5511999999999-162839@g.us)
+    # nos quedamos estrictamente con la parte del número del usuario que suele venir después del guion
+    # o si viene al revés, extraemos solo la cadena numérica limpia del teléfono.
+    if "-" in id_antes_del_arroba:
+        partes = id_antes_del_arroba.split("-")
+        # Por lo general en Whapi el formato de participante de grupo es IDGRUPO-IDUSUARIO o viceversa.
+        # Buscamos cuál de las partes parece un número de teléfono real (más de 8 dígitos)
+        numero_persona = partes[1] if len(partes[1]) >= 8 else partes[0]
+    else:
+        numero_persona = id_antes_del_arroba
+
+    # 3. Limpieza final: dejamos SOLO los números (eliminando letras o símbolos raros residuales)
+    numero_persona = re.sub(r'\D', '', numero_persona)
     
     link_directo = f"wa.me/{numero_persona}"
     
