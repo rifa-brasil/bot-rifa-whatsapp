@@ -11,8 +11,8 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# 🔑 COLOCA AQUÍ EL NOMBRE EXACTO DE TU GRUPO DE WHATSAPP (Tal cual aparece en tu teléfono)
-NOMBRE_DEL_GRUPO = "Rifa - Brasil" 
+# 🔑 CUANDO SEPAS EL ID REAL, LO PEGAS AQUÍ (Por ahora déjalo así)
+GRUPO_CHAT_ID = "TU_ID_DE_GRUPO_AQUI@g.us"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
 CLAVE_RESET = "admin.resetear.rifa.99"
@@ -41,27 +41,6 @@ def obtener_rifa():
 def guardar_rifa(rifa):
     with open(DB_FILE, "w") as f:
         json.dump(rifa, f, indent=4)
-
-def buscar_id_grupo_por_nombre(nombre_grupo):
-    """Busca en Whapi todos los chats para encontrar el ID del grupo usando su nombre"""
-    url_chats = "https://gate.whapi.cloud/chats?count=100"
-    headers = {
-        "accept": "application/json",
-        "authorization": f"Bearer {WHAPI_TOKEN}"
-    }
-    try:
-        respuesta = requests.get(url_chats, headers=headers)
-        if respuesta.status_code == 200:
-            chats = respuesta.json().get("chats", [])
-            for chat in chats:
-                # Comparamos si el nombre coincide (quitando espacios extras)
-                if chat.get("name", "").strip().lower() == nombre_grupo.strip().lower():
-                    print(f"✅ ¡ID Encontrado para el grupo '{nombre_grupo}': {chat['id']}")
-                    return chat["id"]
-        print(f"⚠️ No se encontró ningún grupo activo llamado: '{nombre_grupo}'")
-    except Exception as e:
-        print(f"Error al buscar el ID del grupo: {e}")
-    return None
 
 def generar_texto_lista():
     rifa = obtener_rifa()
@@ -137,6 +116,9 @@ def webhook():
     mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
     comando = mensaje_texto.lower()
 
+    # 👀 PRINT DE AUXILIO: Imprime siempre el ID del chat en la consola de Render
+    print(f"📡 MENSAJE RECIBIDO - Comando: '{comando}' | Desde el Chat ID: {chat_id}")
+
     id_antes_del_arroba = raw_from.split("@")[0]
     numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
     link_directo = f"wa.me/{numero_persona}"
@@ -173,13 +155,7 @@ def webhook():
                     telefono_ganador = info_ganador["telefono"].replace("+", "").strip()
                     chat_privado_ganador = f"{telefono_ganador}@c.us"
                     
-                    # Buscamos el ID dinámicamente usando el nombre configurado arriba
-                    grupo_id_detectado = buscar_id_grupo_por_nombre(NOMBRE_DEL_GRUPO)
-                    
-                    # Si no lo encuentra, usamos el chat actual para no perder el mensaje
-                    destino_grupo = grupo_id_detectado if grupo_id_detectado else chat_id
-                    
-                    # 1. Mensaje transparente enviado de forma explícita al GRUPO
+                    # 1. Mensaje transparente enviado al grupo configurado
                     texto_grupo = (
                         f"🎉🎉 *¡TENEMOS UN GANADOR EN LA RIFA!* 🎉🎉\n\n"
                         f"El número premiado en el tiro de la Florida fue el *{num_ganador.zfill(2)}*.\n\n"
@@ -187,7 +163,10 @@ def webhook():
                         f"📩 Le hemos enviado un mensaje privado automáticamente para coordinar su premio."
                     )
                     lista_menciones = [chat_privado_ganador]
-                    enviar_mensaje_whapi(destino_grupo, texto_grupo, menciones=lista_menciones)
+                    
+                    # Si no has cambiado el ID arriba, usará el chat desde donde mandaste el comando
+                    destino = GRUPO_CHAT_ID if "TU_ID_DE_GRUPO_AQUI" not in GRUPO_CHAT_ID else chat_id
+                    enviar_mensaje_whapi(destino, texto_grupo, menciones=lista_menciones)
                     
                     # 2. Mensaje enviado directamente al PRIVADO del ganador
                     texto_privado = (
@@ -206,7 +185,7 @@ def webhook():
         else:
             respuesta = "⚠️ Por favor, escribe el número ganador al final de la frase. Ejemplo: *resultado de florida con 25*"
 
-    # ✨ SALUDO ACTUALIZADO
+    # ✨ SALUDO
     elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
         respuesta = (
             f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n"
