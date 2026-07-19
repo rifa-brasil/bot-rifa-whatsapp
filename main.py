@@ -10,8 +10,9 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# Tu número administrativo (sin el +)
-NUMERO_ADMIN = "5511948824359" 
+# 🔑 CLAVE SECRETA DE ADMINISTRADOR
+# Cambia esta palabra si deseas otra contraseña secreta.
+CLAVE_RESET = "reset1234"
 
 DB_FILE = "rifa_db.json"
 
@@ -21,13 +22,11 @@ def inicializar_rifa():
         with open(DB_FILE, "w") as f:
             json.dump(rifa, f, indent=4)
 
-# 🔄 NUEVA FUNCIÓN DE RESETEO ABSOLUTO: Limpia los datos uno por uno dentro del archivo existente
 def resetear_lista_total():
-    inicializar_rifa() # Nos aseguramos de que el archivo exista
+    inicializar_rifa()
     with open(DB_FILE, "r") as f:
         rifa = json.load(f)
     
-    # Recorremos los 100 números y los limpiamos por completo
     for i in range(1, 101):
         rifa[str(i)] = {
             "estado": "disponible",
@@ -36,7 +35,6 @@ def resetear_lista_total():
             "enlace": ""
         }
     
-    # Guardamos los cambios forzando la escritura
     with open(DB_FILE, "w") as f:
         json.dump(rifa, f, indent=4)
 
@@ -135,14 +133,11 @@ def webhook():
     rifa = obtener_rifa()
     respuesta = ""
 
-    # 🔐 VALIDACIÓN DE SEGURIDAD TOTAL: Abre el comando para que funcione de dos maneras
-    if comando in ["reiniciar rifa", "resetear rifa"]:
-        # Verificamos si tu número administrador coincide de cualquier forma en la solicitud
-        if NUMERO_ADMIN in raw_from or NUMERO_ADMIN in chat_id or NUMERO_ADMIN in numero_persona:
-            resetear_lista_total()
-            respuesta = "🔄 *¡La rifa ha sido reseteada por el Administrador!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
-        else:
-            respuesta = "⚠️ Lo siento, no tienes permisos de administrador para ejecutar este comando."
+    # 🔐 VALIDACIÓN POR CONTRASEÑA MÁSTER
+    # Si el mensaje coincide exactamente con la clave de reinicio, se ejecuta sin importar el número
+    if comando == CLAVE_RESET:
+        resetear_lista_total()
+        respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
 
     elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
         respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (puedes separar varios por comas, ej: *7, 14, 25*)."
