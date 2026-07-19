@@ -11,8 +11,8 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# 🔑 CUANDO SEPAS EL ID REAL, LO PEGAS AQUÍ (Por ahora déjalo así)
-GRUPO_CHAT_ID = "TU_ID_DE_GRUPO_AQUI@g.us"
+# 🔑 ID REAL DE TU GRUPO DE WHATSAPP YA CONFIGURADO
+GRUPO_CHAT_ID = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
 CLAVE_RESET = "admin.resetear.rifa.99"
@@ -116,9 +116,6 @@ def webhook():
     mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
     comando = mensaje_texto.lower()
 
-    # 👀 PRINT DE AUXILIO: Imprime siempre el ID del chat en la consola de Render
-    print(f"📡 MENSAJE RECIBIDO - Comando: '{comando}' | Desde el Chat ID: {chat_id}")
-
     id_antes_del_arroba = raw_from.split("@")[0]
     numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
     link_directo = f"wa.me/{numero_persona}"
@@ -155,7 +152,7 @@ def webhook():
                     telefono_ganador = info_ganador["telefono"].replace("+", "").strip()
                     chat_privado_ganador = f"{telefono_ganador}@c.us"
                     
-                    # 1. Mensaje transparente enviado al grupo configurado
+                    # 1. Mensaje transparente enviado de forma obligatoria al GRUPO
                     texto_grupo = (
                         f"🎉🎉 *¡TENEMOS UN GANADOR EN LA RIFA!* 🎉🎉\n\n"
                         f"El número premiado en el tiro de la Florida fue el *{num_ganador.zfill(2)}*.\n\n"
@@ -163,10 +160,7 @@ def webhook():
                         f"📩 Le hemos enviado un mensaje privado automáticamente para coordinar su premio."
                     )
                     lista_menciones = [chat_privado_ganador]
-                    
-                    # Si no has cambiado el ID arriba, usará el chat desde donde mandaste el comando
-                    destino = GRUPO_CHAT_ID if "TU_ID_DE_GRUPO_AQUI" not in GRUPO_CHAT_ID else chat_id
-                    enviar_mensaje_whapi(destino, texto_grupo, menciones=lista_menciones)
+                    enviar_mensaje_whapi(GRUPO_CHAT_ID, texto_grupo, menciones=lista_menciones)
                     
                     # 2. Mensaje enviado directamente al PRIVADO del ganador
                     texto_privado = (
@@ -177,6 +171,7 @@ def webhook():
                     )
                     enviar_mensaje_whapi(chat_privado_ganador, texto_privado)
                     
+                    # Vaciamos respuesta para que no duplique el mensaje en el chat de origen del comando
                     respuesta = ""
                 else:
                     respuesta = f"🎫 El número *{num_ganador.zfill(2)}* salió premiado en la Florida, pero lamentablemente quedó *Disponible* (nadie lo compró)."
@@ -185,7 +180,7 @@ def webhook():
         else:
             respuesta = "⚠️ Por favor, escribe el número ganador al final de la frase. Ejemplo: *resultado de florida con 25*"
 
-    # ✨ SALUDO
+    # ✨ SALUDO ACTUALIZADO
     elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
         respuesta = (
             f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n"
