@@ -11,7 +11,7 @@ WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K"
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
 # 🔒 TU NÚMERO ADMINISTRADOR REAL ELECTO (Sin el +)
-NUMERO_ADMIN = "+5511948824359" 
+NUMERO_ADMIN = "5511948824359" 
 
 DB_FILE = "rifa_db.json"
 
