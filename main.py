@@ -88,36 +88,30 @@ def webhook():
     if msg.get("from_me", False):
         return "Sent by me", 200
 
+    # chat_id es la dirección a donde responder (en grupos es el ID del grupo)
     chat_id = msg.get("chat_id", "")
-    sender_id = msg.get("sender_id", "")
     
-    # Tomamos el identificador del emisor
-    raw_sender = sender_id if sender_id else chat_id
+    # ESTRUCTURA DE WHAPI PARA GRUPOS: 'from' contiene el número real del participante
+    raw_from = msg.get("from", "")
     
-    # 1. Quitamos el @g.us o @c.us si viene incluido
-    id_antes_del_arroba = raw_sender.split("@")[0]
-    
-    # 2. Si Whapi junta el ID del grupo y el del usuario con un guion (ej: 5511999999999-162839@g.us)
-    # nos quedamos estrictamente con la parte del número del usuario que suele venir después del guion
-    # o si viene al revés, extraemos solo la cadena numérica limpia del teléfono.
-    if "-" in id_antes_del_arroba:
-        partes = id_antes_del_arroba.split("-")
-        # Por lo general en Whapi el formato de participante de grupo es IDGRUPO-IDUSUARIO o viceversa.
-        # Buscamos cuál de las partes parece un número de teléfono real (más de 8 dígitos)
-        numero_persona = partes[1] if len(partes[1]) >= 8 else partes[0]
-    else:
-        numero_persona = id_antes_del_arroba
-
-    # 3. Limpieza final: dejamos SOLO los números (eliminando letras o símbolos raros residuales)
-    numero_persona = re.sub(r'\D', '', numero_persona)
+    # Si por alguna razón 'from' no viene, usamos la parte limpia del chat_id
+    if not raw_from:
+        raw_from = chat_id
+        
+    # Limpiamos el número quedándonos solo con los dígitos puros antes de cualquier arroba
+    id_antes_del_arroba = raw_from.split("@")[0]
+    numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
     
     link_directo = f"wa.me/{numero_persona}"
     
-    # Lógica para obtener el nombre
-    nombre_usuario = msg.get("sender_name", "").strip()
+    # Lógica para obtener el nombre público del participante
+    nombre_usuario = msg.get("from_name", "").strip()  # Whapi usa from_name en grupos
+    if not nombre_usuario:
+        nombre_usuario = msg.get("sender_name", "").strip()
     if not nombre_usuario:
         nombre_usuario = msg.get("contact", {}).get("name", "").strip()
     
+    # Si el usuario no tiene nombre configurado, usamos su número con el signo +
     if not nombre_usuario:
         nombre_usuario = f"+{numero_persona}"
     
