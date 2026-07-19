@@ -11,8 +11,9 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
+# 🔑 CONFIGURACIÓN DE SEGURIDAD DE ADMINISTRADOR
 CLAVE_RESET = "admin.resetear.rifa.99"
+ADMIN_PHONE = "5511948824359"  # ✅ Tu número configurado con éxito
 
 DB_FILE = "rifa_db.json"
 
@@ -135,12 +136,18 @@ def webhook():
         borrar_y_recrear_base_datos()
         respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
 
-    # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE
+    # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE (CONTROLADO POR TU NÚMERO DE ADMIN)
     elif comando.startswith("resultado de florida con"):
-        # Extraemos solo los dígitos numéricos que escribiste al final de la frase
+        # Seguridad: Solo responde si viene de tu número de WhatsApp o si incluye la clave secreta
+        es_admin = (numero_persona == ADMIN_PHONE) or (CLAVE_RESET in mensaje_texto)
+        
+        if not es_admin:
+            return "Unauthorized user ignored", 200
+
+        # Extraemos el número que pusiste al final
         numeros_encontrados = re.findall(r'\d+', comando)
         if numeros_encontrados:
-            num_ganador = str(int(numeros_encontrados[0])) # Lo pasa a entero y luego a string para quitar ceros extras (ej: "07" -> "7")
+            num_ganador = str(int(numeros_encontrados[0]))
             
             if num_ganador in rifa:
                 info_ganador = rifa[num_ganador]
@@ -150,7 +157,7 @@ def webhook():
                     telefono_ganador = info_ganador["telefono"].replace("+", "").strip()
                     chat_privado_ganador = f"{telefono_ganador}@c.us"
                     
-                    # 1. Armamos el anuncio para el grupo de WhatsApp
+                    # 1. Mensaje de premiación para enviar al grupo principal
                     respuesta = (
                         f"🎉🎉 *¡TENEMOS UN GANADOR EN LA RIFA!* 🎉🎉\n\n"
                         f"El número premiado en el tiro de la Florida fue el *{num_ganador.zfill(2)}*.\n\n"
@@ -159,7 +166,7 @@ def webhook():
                     )
                     lista_menciones = [chat_privado_ganador]
                     
-                    # 2. Enviamos el mensaje al PRIVADO del ganador de forma automática
+                    # 2. Mensaje directo que se dispara directo al privado del ganador
                     texto_privado = (
                         f"¡Hola {nombre_ganador}! 👋\n\n"
                         f"🎉 *¡MUCHAS FELICIDADES!* 🎉\n\n"
