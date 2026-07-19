@@ -5,8 +5,8 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# ⚠️ zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K
-WHAPI_TOKEN = "PEGA_AQUI_TU_TOKEN" 
+# Tu Token de Whapi configurado de forma segura
+WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
 DB_FILE = "rifa_db.json"
