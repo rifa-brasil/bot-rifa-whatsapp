@@ -10,7 +10,7 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# ⚠️ REPLAZA ESTO con tu número de teléfono de administrador (sin el +)
+# Tu número administrativo (configurado con el código de país sin el +)
 NUMERO_ADMIN = "5511948824359" 
 
 DB_FILE = "rifa_db.json"
@@ -100,6 +100,9 @@ def webhook():
     id_antes_del_arroba = raw_from.split("@")[0]
     numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
     
+    # LÍNEA DE CONTROL: Imprime en la consola de Render quién está enviando el mensaje
+    print(f"DEBUG: Mensaje recibido de {numero_persona} (Admin esperado: {NUMERO_ADMIN})")
+    
     link_directo = f"wa.me/{numero_persona}"
     
     nombre_usuario = msg.get("from_name", "").strip()
@@ -119,8 +122,8 @@ def webhook():
 
     respuesta = ""
 
-    # 🔐 COMANDO SECRETO DE RESET
-    if mensaje_texto.lower() == "/resetear":
+    # 🔐 NUEVO COMANDO DE RESET (Sin la barra diagonal)
+    if mensaje_texto.lower() == "reiniciar rifa":
         if numero_persona == NUMERO_ADMIN:
             inicializar_rifa(forzar=True)
             respuesta = "🔄 *¡La rifa ha sido reseteada por el Administrador!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
@@ -131,12 +134,7 @@ def webhook():
         respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (puedes separar varios por comas, ej: *7, 14, 25*)."
 
     else:
-        # LÓGICA PARA PROCESAR NÚMEROS INDIVIDUALES O SEPARADOS POR COMAS
-        # Buscamos si el mensaje tiene el formato de números (ya sea '7' o '7, 8, 9')
-        # Reemplazamos espacios y separamos por comas
         partes = [p.strip() for p in mensaje_texto.split(",")]
-        
-        # Validamos que todas las partes sean números
         es_lista_numeros = all(p.isdigit() for p in partes) if partes and mensaje_texto else False
 
         if es_lista_numeros:
@@ -150,7 +148,6 @@ def webhook():
                     num_str = str(num_elegido)
                     info = rifa[num_str]
                     if info["estado"] == "disponible":
-                        # Lo reservamos temporalmente en memoria
                         rifa[num_str] = {
                             "estado": "ocupado",
                             "nombre": nombre_usuario,
@@ -163,11 +160,9 @@ def webhook():
                 else:
                     invalidos.append(p)
 
-            # Si se logró reservar al menos uno, guardamos los cambios en la base de datos
             if exitos:
                 guardar_rifa(rifa)
 
-            # Construimos la respuesta basada en el resultado de la operación
             mensajes_resultado = []
             if exitos:
                 mensajes_resultado.append(f"✅ ¡Felicidades! Reservaste con éxito: {', '.join(exitos)}.")
