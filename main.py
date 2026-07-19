@@ -1,8 +1,13 @@
 import os
 import json
+import requests
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+
+# ⚠️ PEGA AQUÍ TU TOKEN ENTRE LAS COMILLAS
+WHAPI_TOKEN = "PEGA_AQUI_TU_TOKEN" 
+WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
 DB_FILE = "rifa_db.json"
 
@@ -35,6 +40,22 @@ def generar_texto_lista():
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     return texto
 
+def enviar_mensaje_whapi(chat_id, texto):
+    payload = {
+        "to": chat_id,
+        "body": texto
+    }
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": f"Bearer {WHAPI_TOKEN}"
+    }
+    try:
+        response = requests.post(WHAPI_API_URL, json=payload, headers=headers)
+        print(f"Respuesta de Whapi: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"Error al enviar a Whapi: {e}")
+
 @app.route("/", methods=["GET"])
 def home():
     return "Servidor conectado con Whapi listo.", 200
@@ -45,22 +66,18 @@ def webhook():
     if not data:
         return "No data", 400
 
-    # Whapi envía una lista de mensajes en un array 'messages'
     messages = data.get("messages", [])
     if not messages:
         return "No messages", 200
 
     msg = messages[0]
     
-    # Evita responder a los mensajes enviados por el propio bot
     if msg.get("from_me", False):
         return "Sent by me", 200
 
-    # Extraer datos según el formato de Whapi
-    chat_id = msg.get("chat_id", "")  # Identificador del chat privado o grupo
+    chat_id = msg.get("chat_id", "")
     nombre_usuario = msg.get("sender_name", "Participante")
     
-    # Obtener el texto del mensaje
     text_obj = msg.get("text", {})
     mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
 
@@ -69,7 +86,6 @@ def webhook():
 
     respuesta = ""
 
-    # Lógica del bot
     if mensaje_texto.lower() in ["hola", "buenas", "lista", "inicio", "rifa"]:
         respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (ejemplo: si quieres el 7, escribe solo el número *7*)."
 
@@ -90,15 +106,10 @@ def webhook():
                 respuesta = f"❌ El número *{num_str.zfill(2)}* ya está ocupado por {info['nombre']}.\n\n" + generar_texto_lista()
 
     if respuesta:
-        # Devolvemos la respuesta estructurada para que Whapi la envíe de vuelta al mismo chat
-        return jsonify({
-            "to": chat_id,
-            "body": respuesta
-        })
+        enviar_mensaje_whapi(chat_id, respuesta)
 
-    return "Message not processed", 200
+    return "OK", 200
 
 if __name__ == "__main__":
     inicializar_rifa()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-   
