@@ -15,11 +15,30 @@ NUMERO_ADMIN = "5511948824359"
 
 DB_FILE = "rifa_db.json"
 
-def inicializar_rifa(forzar=False):
-    if forzar or not os.path.exists(DB_FILE):
-        rifa = {str(i): {"estado": "disponible", "nombre": "", "telefono": ""} for i in range(1, 101)}
+def inicializar_rifa():
+    if not os.path.exists(DB_FILE):
+        rifa = {str(i): {"estado": "disponible", "nombre": "", "telefono": "", "enlace": ""} for i in range(1, 101)}
         with open(DB_FILE, "w") as f:
             json.dump(rifa, f, indent=4)
+
+# 🔄 NUEVA FUNCIÓN DE RESETEO ABSOLUTO: Limpia los datos uno por uno dentro del archivo existente
+def resetear_lista_total():
+    inicializar_rifa() # Nos aseguramos de que el archivo exista
+    with open(DB_FILE, "r") as f:
+        rifa = json.load(f)
+    
+    # Recorremos los 100 números y los limpiamos por completo
+    for i in range(1, 101):
+        rifa[str(i)] = {
+            "estado": "disponible",
+            "nombre": "",
+            "telefono": "",
+            "enlace": ""
+        }
+    
+    # Guardamos los cambios forzando la escritura
+    with open(DB_FILE, "w") as f:
+        json.dump(rifa, f, indent=4)
 
 def obtener_rifa():
     with open(DB_FILE, "r") as f:
@@ -67,7 +86,7 @@ def enviar_mensaje_whapi(chat_id, texto):
         "authorization": f"Bearer {WHAPI_TOKEN}"
     }
     try:
-        response = requests.post(WHAPI_API_URL, json=payload, headers=headers)
+        requests.post(WHAPI_API_URL, json=payload, headers=headers)
     except Exception as e:
         print(f"Error al enviar a Whapi: {e}")
 
@@ -91,18 +110,15 @@ def webhook():
         return "Sent by me", 200
 
     chat_id = msg.get("chat_id", "")
-    
-    # Capturamos de forma segura quién envía el mensaje
     raw_from = msg.get("from", "")
+    
     if not raw_from:
         raw_from = msg.get("sender_id", chat_id)
         
-    # Limpiamos el texto del mensaje quitando espacios extras
     text_obj = msg.get("text", {})
     mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
     comando = mensaje_texto.lower()
 
-    # Extraemos el número limpio para el enlace de WhatsApp
     id_antes_del_arroba = raw_from.split("@")[0]
     numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
     link_directo = f"wa.me/{numero_persona}"
@@ -119,10 +135,11 @@ def webhook():
     rifa = obtener_rifa()
     respuesta = ""
 
-    # 🔐 VALIDACIÓN MEJORADA: Compara si tu NUMERO_ADMIN está metido dentro del ID del emisor
-    if comando == "reiniciar rifa":
-        if NUMERO_ADMIN in raw_from or NUMERO_ADMIN in chat_id:
-            inicializar_rifa(forzar=True)
+    # 🔐 VALIDACIÓN DE SEGURIDAD TOTAL: Abre el comando para que funcione de dos maneras
+    if comando in ["reiniciar rifa", "resetear rifa"]:
+        # Verificamos si tu número administrador coincide de cualquier forma en la solicitud
+        if NUMERO_ADMIN in raw_from or NUMERO_ADMIN in chat_id or NUMERO_ADMIN in numero_persona:
+            resetear_lista_total()
             respuesta = "🔄 *¡La rifa ha sido reseteada por el Administrador!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
         else:
             respuesta = "⚠️ Lo siento, no tienes permisos de administrador para ejecutar este comando."
