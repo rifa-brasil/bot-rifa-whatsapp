@@ -12,7 +12,7 @@ WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
 # 🔑 CLAVE SECRETA DE ADMINISTRADOR
 # Cambia esta palabra si deseas otra contraseña secreta.
-CLAVE_RESET = "reset1234"
+CLAVE_RESET = "reset12345"
 
 DB_FILE = "rifa_db.json"
 
