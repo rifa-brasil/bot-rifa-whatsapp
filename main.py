@@ -11,11 +11,10 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# 🔑 ID REAL DE TU GRUPO DE WHATSAPP
-GRUPO_CHAT_ID = "DyI3ISDPZjyKw3w0cD8elC@g.us"
+# 🔑 ID DE RESPALDO DE TU GRUPO (Asegúrate de que coincida exactamente)
+GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
-# 🔐 FILTRO DE SEGURIDAD MÁSTER: El número del administrador (Tu base de teléfono en São Paulo)
-# Buscaremos esta parte central para evitar los problemas del 9 móvil de Brasil.
+# 🔐 FILTRO DE SEGURIDAD MÁSTER: Tu base de teléfono en São Paulo
 NUMERO_ADMIN_SEGURO = "48824359"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
@@ -117,11 +116,12 @@ def webhook():
     if "lista oficial de la rifa" in comando or "participantes convocados" in comando:
         return "Bot message ignored to prevent loops", 200
 
-    chat_id = msg.get("chat_id", "")
+    # Capturamos el chat actual (puede ser el grupo o un privado)
+    chat_id_actual = msg.get("chat_id", "")
     raw_from = msg.get("from", "")
     
     if not raw_from:
-        raw_from = msg.get("sender_id", chat_id)
+        raw_from = msg.get("sender_id", chat_id_actual)
 
     id_antes_del_arroba = raw_from.split("@")[0]
     numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
@@ -140,12 +140,11 @@ def webhook():
     respuesta = ""
     lista_menciones = []
 
-    # 🔐 VALIDACIÓN DE SEGURIDAD PARA COMANDOS CRÍTICOS (Reset y Ganador)
+    # 🔐 VALIDACIÓN DE SEGURIDAD
     es_admin_real = NUMERO_ADMIN_SEGURO in numero_persona
 
     if comando == CLAVE_RESET:
         if not es_admin_real:
-            print(f"🚫 Intento de reset no autorizado por {numero_persona}")
             return "Unauthorized", 200
         borrar_y_recrear_base_datos()
         respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
@@ -153,7 +152,6 @@ def webhook():
     # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE
     elif comando.startswith("resultado de florida con"):
         if not es_admin_real:
-            print(f"🚫 Participante {numero_persona} intentó declarar un ganador falso. Bloqueado.")
             return "Unauthorized", 200
 
         numeros_encontrados = re.findall(r'\d+', comando)
@@ -168,7 +166,11 @@ def webhook():
                     telefono_ganador = info_ganador["telefono"].replace("+", "").strip()
                     chat_privado_ganador = f"{telefono_ganador}@c.us"
                     
-                    # 1️⃣ MENSAJE ENVIADO DIRECTAMENTE AL GRUPO OFICIAL DE LA RIFA
+                    # 🎯 ESTRATEGIA DE ENVÍO AL GRUPO: 
+                    # Si mandas el comando desde el grupo, usamos 'chat_id_actual' para asegurar el tiro.
+                    # Si lo mandas desde un chat privado, usamos el ID de respaldo.
+                    grupo_destino = chat_id_actual if "@g.us" in chat_id_actual else GRUPO_CHAT_ID_RESPALDO
+                    
                     texto_grupo = (
                         f"🎉🎉 *¡TENEMOS UN GANADOR EN LA RIFA!* 🎉🎉\n\n"
                         f"El número premiado en el tiro de la Florida fue el *{num_ganador.zfill(2)}*.\n\n"
@@ -176,9 +178,11 @@ def webhook():
                         f"📩 Le hemos enviado un mensaje privado automáticamente para coordinar su premio."
                     )
                     lista_menciones = [chat_privado_ganador]
-                    enviar_mensaje_whapi(GRUPO_CHAT_ID, texto_grupo, menciones=lista_menciones)
                     
-                    # 2️⃣ MENSAJE AL PRIVADO DEL GANADOR
+                    # Enviar al grupo oficial
+                    enviar_mensaje_whapi(grupo_destino, texto_grupo, menciones=lista_menciones)
+                    
+                    # Enviar al privado del ganador
                     texto_privado = (
                         f"¡Hola {nombre_ganador}! 👋\n\n"
                         f"🎉 *¡MUCHAS FELICIDADES!* 🎉\n\n"
@@ -187,7 +191,6 @@ def webhook():
                     )
                     enviar_mensaje_whapi(chat_privado_ganador, texto_privado)
                     
-                    # Como ya enviamos los mensajes arriba a sus destinos correspondientes, vaciamos la respuesta genérica
                     return "OK", 200
                 else:
                     respuesta = f"🎫 El número *{num_ganador.zfill(2)}* salió premiado en la Florida, pero lamentablemente quedó *Disponible* (nadie lo compró)."
@@ -196,7 +199,7 @@ def webhook():
         else:
             respuesta = "⚠️ Por favor, escribe el número ganador al final de la frase. Ejemplo: *resultado de florida con 25*"
 
-    # ✨ SALUDO / LISTA (Cualquier usuario o tú pueden pedirla)
+    # ✨ SALUDO / LISTA
     elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
         respuesta = (
             f"¡Hola {nombre_usuario}! Aquí tienes el estado actual de la Rifa. ✨\n\n"
@@ -275,12 +278,12 @@ def webhook():
                 menciones_texto = " ".join([f"@{t.split('@')[0]}" for t in lista_menciones])
                 respuesta_cierre += menciones_texto
 
-                enviar_mensaje_whapi(chat_id, respuesta)
-                enviar_mensaje_whapi(chat_id, respuesta_cierre, menciones=lista_menciones)
+                enviar_mensaje_whapi(chat_id_actual, respuesta)
+                enviar_mensaje_whapi(chat_id_actual, respuesta_cierre, menciones=lista_menciones)
                 return "OK", 200
 
     if respuesta:
-        enviar_mensaje_whapi(chat_id, respuesta, menciones=lista_menciones)
+        enviar_mensaje_whapi(chat_id_actual, respuesta, menciones=lista_menciones)
 
     return "OK", 200
 
