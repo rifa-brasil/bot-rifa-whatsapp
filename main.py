@@ -14,6 +14,10 @@ WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 # 🔑 ID REAL DE TU GRUPO DE WHATSAPP YA CONFIGURADO
 GRUPO_CHAT_ID = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
+# 🔐 SEGURIDAD: Coloca aquí tu número de teléfono de administrador con código de país (Sin el signo +)
+# Ejemplo: "5562999999999" (Si es de Brasil) o "535XXXXXX" (Si es de Cuba)
+TELEFONO_ADMINISTRADOR = "5511048824359"
+
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
 CLAVE_RESET = "admin.resetear.rifa.99"
 
@@ -138,8 +142,12 @@ def webhook():
         borrar_y_recrear_base_datos()
         respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
 
-    # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE
+    # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE (SOLO ADMIN)
     elif comando.startswith("resultado de florida con"):
+        # 🛡️ VALIDACIÓN: Si el número que envía NO coincide con el admin, el bot lo ignora por completo
+        if numero_persona != TELEFONO_ADMINISTRADOR.strip():
+            return "Unauthorized user", 200
+
         numeros_encontrados = re.findall(r'\d+', comando)
         if numeros_encontrados:
             num_ganador = str(int(numeros_encontrados[0]))
@@ -152,7 +160,7 @@ def webhook():
                     telefono_ganador = info_ganador["telefono"].replace("+", "").strip()
                     chat_privado_ganador = f"{telefono_ganador}@c.us"
                     
-                    # 1. Mensaje transparente enviado de forma obligatoria al GRUPO
+                    # 1. Mensaje enviado de forma obligatoria al GRUPO (Transparencia)
                     texto_grupo = (
                         f"🎉🎉 *¡TENEMOS UN GANADOR EN LA RIFA!* 🎉🎉\n\n"
                         f"El número premiado en el tiro de la Florida fue el *{num_ganador.zfill(2)}*.\n\n"
@@ -171,7 +179,6 @@ def webhook():
                     )
                     enviar_mensaje_whapi(chat_privado_ganador, texto_privado)
                     
-                    # Vaciamos respuesta para que no duplique el mensaje en el chat de origen del comando
                     respuesta = ""
                 else:
                     respuesta = f"🎫 El número *{num_ganador.zfill(2)}* salió premiado en la Florida, pero lamentablemente quedó *Disponible* (nadie lo compró)."
