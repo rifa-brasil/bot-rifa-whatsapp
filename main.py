@@ -10,8 +10,8 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# 🔒 TU NÚMERO ADMINISTRADOR REAL ELECTO (Sin el +)
-NUMERO_ADMIN = "5511948824359" 
+# 🔑 TU CLAVE SECRETA DE ADMINISTRADOR
+CLAVE_RESET = "adminresetrifa6645"
 
 DB_FILE = "rifa_db.json"
 
@@ -109,7 +109,6 @@ def webhook():
     mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
     comando = mensaje_texto.lower()
 
-    # Procesamos el número que envía el mensaje de forma limpia
     id_antes_del_arroba = raw_from.split("@")[0]
     numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
     link_directo = f"wa.me/{numero_persona}"
@@ -126,18 +125,20 @@ def webhook():
     rifa = obtener_rifa()
     respuesta = ""
 
-    # 🔐 FILTRO DE SEGURIDAD ABSOLUTO PARA EL REINICIO
-    if comando in ["reiniciar rifa", "resetear rifa"]:
-        # Comparamos si tu número administrador (5511948824359) coincide con el emisor en cualquier formato
-        if NUMERO_ADMIN in raw_from or NUMERO_ADMIN in numero_persona:
-            borrar_y_recrear_base_datos()
-            respuesta = "🔄 *¡La rifa ha sido reseteada por el Administrador!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
-        else:
-            # Si escribe la frase otra persona, el bot responde esto y NO borra nada
-            respuesta = "⚠️ Lo siento, no tienes permisos de administrador para ejecutar este comando."
+    # 🔐 REINICIO POR FRASE MÁSTER
+    if comando == CLAVE_RESET:
+        borrar_y_recrear_base_datos()
+        respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
 
+    # ✨ SALUDO ACTUALIZADO CON PRECIOS, PREMIOS Y CONDICIONES DE ENTREGA
     elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
-        respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (puedes separar varios por comas, ej: *7, 14, 25*)."
+        respuesta = (
+            f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n"
+            f"💵 *Compra uno o varios números por un valor de 10 reales y gana 400 reales.*\n"
+            f"🏆 El premio se entregará aquí en Brasil mediante transferencia PIX o al familiar en Cuba en CUP.\n\n"
+            f"{generar_texto_lista()}\n\n"
+            f"👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (puedes separar varios por comas, ej: *7, 14, 25*)."
+        )
 
     else:
         partes = [p.strip() for p in mensaje_texto.split(",")]
