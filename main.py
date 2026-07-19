@@ -2,6 +2,7 @@ import os
 import json
 import requests
 import re
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
@@ -10,8 +11,8 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# 🔑 TU CLAVE SECRETA DE ADMINISTRADOR
-CLAVE_RESET = "/adminresetrifa6645"
+# 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
+CLAVE_RESET = "admin.resetear.rifa.99"
 
 DB_FILE = "rifa_db.json"
 
@@ -65,11 +66,14 @@ def generar_texto_lista():
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     return texto
 
-def enviar_mensaje_whapi(chat_id, texto):
+def enviar_mensaje_whapi(chat_id, texto, menciones=[]):
     payload = {
         "to": chat_id,
         "body": texto
     }
+    if menciones:
+        payload["mentions"] = menciones
+
     headers = {
         "accept": "application/json",
         "content-type": "application/json",
@@ -124,13 +128,53 @@ def webhook():
     inicializar_rifa()
     rifa = obtener_rifa()
     respuesta = ""
+    lista_menciones = []
 
     # 🔐 REINICIO POR FRASE MÁSTER
     if comando == CLAVE_RESET:
         borrar_y_recrear_base_datos()
         respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
 
-    # ✨ SALUDO ACTUALIZADO CON PRECIOS, PREMIOS Y CONDICIONES DE ENTREGA
+    # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE
+    elif comando.startswith("resultado de florida con"):
+        # Extraemos solo los dígitos numéricos que escribiste al final de la frase
+        numeros_encontrados = re.findall(r'\d+', comando)
+        if numeros_encontrados:
+            num_ganador = str(int(numeros_encontrados[0])) # Lo pasa a entero y luego a string para quitar ceros extras (ej: "07" -> "7")
+            
+            if num_ganador in rifa:
+                info_ganador = rifa[num_ganador]
+                
+                if info_ganador["estado"] == "ocupado":
+                    nombre_ganador = info_ganador["nombre"]
+                    telefono_ganador = info_ganador["telefono"].replace("+", "").strip()
+                    chat_privado_ganador = f"{telefono_ganador}@c.us"
+                    
+                    # 1. Armamos el anuncio para el grupo de WhatsApp
+                    respuesta = (
+                        f"🎉🎉 *¡TENEMOS UN GANADOR EN LA RIFA!* 🎉🎉\n\n"
+                        f"El número premiado en el tiro de la Florida fue el *{num_ganador.zfill(2)}*.\n\n"
+                        f"🥇 *¡Felicidades {nombre_ganador}!* (@{telefono_ganador}) Eres el ganador de los *400 reales* 💵✨.\n\n"
+                        f"📩 Le hemos enviado un mensaje privado automáticamente para coordinar su premio."
+                    )
+                    lista_menciones = [chat_privado_ganador]
+                    
+                    # 2. Enviamos el mensaje al PRIVADO del ganador de forma automática
+                    texto_privado = (
+                        f"¡Hola {nombre_ganador}! 👋\n\n"
+                        f"🎉 *¡MUCHAS FELICIDADES!* 🎉\n\n"
+                        f"Tu número *{num_ganador.zfill(2)}* salió premiado en el resultado de la Florida y has ganado los *400 reales* de la rifa. 🏆💵\n\n"
+                        f"👉 Por favor, ponte en contacto con el administrador lo antes posible para coordinar tu pago (ya sea transferencia PIX aquí en Brasil o entrega en Cuba en CUP)."
+                    )
+                    enviar_mensaje_whapi(chat_privado_ganador, texto_privado)
+                else:
+                    respuesta = f"🎫 El número *{num_ganador.zfill(2)}* salió premiado en la Florida, pero lamentablemente quedó *Disponible* (nadie lo compró)."
+            else:
+                respuesta = "⚠️ El número ingresado no está en el rango correcto (debe ser del 1 al 100)."
+        else:
+            respuesta = "⚠️ Por favor, escribe el número ganador al final de la frase. Ejemplo: *resultado de florida con 25*"
+
+    # ✨ SALUDO ACTUALIZADO
     elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
         respuesta = (
             f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n"
@@ -180,8 +224,41 @@ def webhook():
 
             respuesta = "\n".join(mensajes_resultado) + "\n\n" + generar_texto_lista()
 
+            # CONTROL DE COBERTURA DE LOS 100 NÚMEROS
+            todos_ocupados = all(rifa[str(n)]["estado"] == "ocupado" for n in range(1, 101))
+            
+            if todos_ocupados:
+                telefonos_participantes = set()
+                for n in range(1, 101):
+                    tel = rifa[str(n)].get("telefono", "").replace("+", "").strip()
+                    if tel:
+                        telefonos_participantes.add(f"{tel}@c.us")
+                
+                lista_menciones = list(telefonos_participantes)
+                hora_actual_brasil = datetime.utcnow() - timedelta(hours=3)
+                hora_int = hora_actual_brasil.hour
+
+                if hora_int < 22:
+                    texto_tiro = "🚨 *¡El resultado será esta misma noche en el tiro de la Florida!* Mucha suerte a todos. 🍀"
+                else:
+                    texto_tiro = "🚨 *¡Los números se completaron tarde! El resultado será mañana en el tiro de la Florida.* Mucha suerte a todos. 🍀"
+
+                respuesta_cierre = (
+                    "🔥 *¡ATENCIÓN A TODOS LOS PARTICIPANTES!* 🔥\n\n"
+                    "¡Todos los 100 números de la rifa han sido ocupados! El sistema se ha cerrado para nuevas compras.\n\n"
+                    f"{texto_tiro}\n\n"
+                    "👥 *Participantes convocados:* "
+                )
+                
+                menciones_texto = " ".join([f"@{t.split('@')[0]}" for t in lista_menciones])
+                respuesta_cierre += menciones_texto
+
+                enviar_mensaje_whapi(chat_id, respuesta)
+                enviar_mensaje_whapi(chat_id, respuesta_cierre, menciones=lista_menciones)
+                return "OK", 200
+
     if respuesta:
-        enviar_mensaje_whapi(chat_id, respuesta)
+        enviar_mensaje_whapi(chat_id, respuesta, menciones=lista_menciones)
 
     return "OK", 200
 
