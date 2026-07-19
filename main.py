@@ -10,9 +10,8 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# 🔑 CLAVE SECRETA DE ADMINISTRADOR
-# Cambia esta palabra si deseas otra contraseña secreta.
-CLAVE_RESET = "reset12345"
+# 🔒 TU NÚMERO ADMINISTRADOR REAL ELECTO (Sin el +)
+NUMERO_ADMIN = "5511948824359" 
 
 DB_FILE = "rifa_db.json"
 
@@ -22,23 +21,16 @@ def inicializar_rifa():
         with open(DB_FILE, "w") as f:
             json.dump(rifa, f, indent=4)
 
-def resetear_lista_total():
+def borrar_y_recrear_base_datos():
+    try:
+        if os.path.exists(DB_FILE):
+            os.remove(DB_FILE)
+    except Exception as e:
+        print(f"Error al eliminar archivo: {e}")
     inicializar_rifa()
-    with open(DB_FILE, "r") as f:
-        rifa = json.load(f)
-    
-    for i in range(1, 101):
-        rifa[str(i)] = {
-            "estado": "disponible",
-            "nombre": "",
-            "telefono": "",
-            "enlace": ""
-        }
-    
-    with open(DB_FILE, "w") as f:
-        json.dump(rifa, f, indent=4)
 
 def obtener_rifa():
+    inicializar_rifa()
     with open(DB_FILE, "r") as f:
         return json.load(f)
 
@@ -117,6 +109,7 @@ def webhook():
     mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
     comando = mensaje_texto.lower()
 
+    # Procesamos el número que envía el mensaje de forma limpia
     id_antes_del_arroba = raw_from.split("@")[0]
     numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
     link_directo = f"wa.me/{numero_persona}"
@@ -133,11 +126,15 @@ def webhook():
     rifa = obtener_rifa()
     respuesta = ""
 
-    # 🔐 VALIDACIÓN POR CONTRASEÑA MÁSTER
-    # Si el mensaje coincide exactamente con la clave de reinicio, se ejecuta sin importar el número
-    if comando == CLAVE_RESET:
-        resetear_lista_total()
-        respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
+    # 🔐 FILTRO DE SEGURIDAD ABSOLUTO PARA EL REINICIO
+    if comando in ["reiniciar rifa", "resetear rifa"]:
+        # Comparamos si tu número administrador (5511948824359) coincide con el emisor en cualquier formato
+        if NUMERO_ADMIN in raw_from or NUMERO_ADMIN in numero_persona:
+            borrar_y_recrear_base_datos()
+            respuesta = "🔄 *¡La rifa ha sido reseteada por el Administrador!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
+        else:
+            # Si escribe la frase otra persona, el bot responde esto y NO borra nada
+            respuesta = "⚠️ Lo siento, no tienes permisos de administrador para ejecutar este comando."
 
     elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
         respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (puedes separar varios por comas, ej: *7, 14, 25*)."
