@@ -13,7 +13,7 @@ WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
 # 🔑 CONFIGURACIÓN DE SEGURIDAD DE ADMINISTRADOR
 CLAVE_RESET = "admin.resetear.rifa.99"
-ADMIN_PHONE = "5511948824359"  # ✅ Tu número configurado con éxito
+ADMIN_PHONE = "5511948824359"  # Tu número de administrador principal
 
 DB_FILE = "rifa_db.json"
 
@@ -115,6 +115,7 @@ def webhook():
     comando = mensaje_texto.lower()
 
     id_antes_del_arroba = raw_from.split("@")[0]
+    # Extraemos solo los números para procesar el remitente de forma limpia
     numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
     link_directo = f"wa.me/{numero_persona}"
     
@@ -136,10 +137,10 @@ def webhook():
         borrar_y_recrear_base_datos()
         respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
 
-    # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE (CONTROLADO POR TU NÚMERO DE ADMIN)
+    # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE
     elif comando.startswith("resultado de florida con"):
-        # Seguridad: Solo responde si viene de tu número de WhatsApp o si incluye la clave secreta
-        es_admin = (numero_persona == ADMIN_PHONE) or (CLAVE_RESET in mensaje_texto)
+        # Corrección de seguridad: Valida si el número de la persona empieza con tu ADMIN_PHONE (ignora sub-IDs de dispositivo)
+        es_admin = numero_persona.startswith(ADMIN_PHONE) or (CLAVE_RESET in mensaje_texto)
         
         if not es_admin:
             return "Unauthorized user ignored", 200
@@ -161,7 +162,7 @@ def webhook():
                     respuesta = (
                         f"🎉🎉 *¡TENEMOS UN GANADOR EN LA RIFA!* 🎉🎉\n\n"
                         f"El número premiado en el tiro de la Florida fue el *{num_ganador.zfill(2)}*.\n\n"
-                        f"🥇 *¡Felicidades {nombre_ganador}!* (@{telefono_ganador}) Eres el ganador de los *400 reales* 💵✨.\n\n"
+                        f"🥇 *¡Felicidades {nombre_ganador}!* Eres el ganador de los *400 reales* 💵✨.\n\n"
                         f"📩 Le hemos enviado un mensaje privado automáticamente para coordinar su premio."
                     )
                     lista_menciones = [chat_privado_ganador]
