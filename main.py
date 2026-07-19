@@ -75,20 +75,25 @@ def webhook():
     if msg.get("from_me", False):
         return "Sent by me", 200
 
+    # chat_id se usa para saber A DÓNDE responder (puede ser el ID del grupo)
     chat_id = msg.get("chat_id", "")
     
-    # Intentar obtener el número limpio eliminando el formato de Whapi si es necesario
-    numero_limpio = chat_id.split("@")[0] if "@" in chat_id else chat_id
+    # sender_id es QUIÉN escribió el mensaje (siempre es el usuario)
+    sender_id = msg.get("sender_id", "")
+    
+    # Extraemos el número de teléfono limpio de la persona que escribió
+    numero_persona = sender_id.split("@")[0] if "@" in sender_id else sender_id
+    if not numero_persona:
+        numero_persona = chat_id.split("@")[0] if "@" in chat_id else chat_id
     
     # Lógica mejorada para obtener el nombre del usuario
     nombre_usuario = msg.get("sender_name", "").strip()
     if not nombre_usuario:
-        # Si no trae sender_name, buscamos dentro del objeto de contacto si existe
         nombre_usuario = msg.get("contact", {}).get("name", "").strip()
     
-    # Si sigue vacío porque no tiene nombre público, usamos su número de WhatsApp
+    # Si la persona no tiene nombre público en WhatsApp, usamos su número de teléfono
     if not nombre_usuario:
-        nombre_usuario = f"+{numero_limpio}"
+        nombre_usuario = f"+{numero_persona}"
     
     text_obj = msg.get("text", {})
     mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
@@ -110,7 +115,7 @@ def webhook():
                 rifa[num_str] = {
                     "estado": "ocupado",
                     "nombre": nombre_usuario,
-                    "telefono": f"+{numero_limpio}"
+                    "telefono": f"+{numero_persona}"
                 }
                 guardar_rifa(rifa)
                 respuesta = f"✅ ¡Felicidades! El número *{num_str.zfill(2)}* ha sido reservado por {nombre_usuario}.\n\n" + generar_texto_lista()
