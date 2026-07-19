@@ -4,7 +4,7 @@ import requests
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
-
+zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K
 # ⚠️ PEGA AQUÍ TU TOKEN ENTRE LAS COMILLAS
 WHAPI_TOKEN = "PEGA_AQUI_TU_TOKEN" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
