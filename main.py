@@ -10,7 +10,7 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# Tu número administrativo (configurado con el código de país sin el +)
+# Tu número administrativo (sin el +)
 NUMERO_ADMIN = "5511948824359" 
 
 DB_FILE = "rifa_db.json"
@@ -68,7 +68,6 @@ def enviar_mensaje_whapi(chat_id, texto):
     }
     try:
         response = requests.post(WHAPI_API_URL, json=payload, headers=headers)
-        print(f"Respuesta de Whapi: {response.status_code} - {response.text}")
     except Exception as e:
         print(f"Error al enviar a Whapi: {e}")
 
@@ -92,17 +91,20 @@ def webhook():
         return "Sent by me", 200
 
     chat_id = msg.get("chat_id", "")
-    raw_from = msg.get("from", "")
     
+    # Capturamos de forma segura quién envía el mensaje
+    raw_from = msg.get("from", "")
     if not raw_from:
-        raw_from = chat_id
+        raw_from = msg.get("sender_id", chat_id)
         
+    # Limpiamos el texto del mensaje quitando espacios extras
+    text_obj = msg.get("text", {})
+    mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
+    comando = mensaje_texto.lower()
+
+    # Extraemos el número limpio para el enlace de WhatsApp
     id_antes_del_arroba = raw_from.split("@")[0]
     numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
-    
-    # LÍNEA DE CONTROL: Imprime en la consola de Render quién está enviando el mensaje
-    print(f"DEBUG: Mensaje recibido de {numero_persona} (Admin esperado: {NUMERO_ADMIN})")
-    
     link_directo = f"wa.me/{numero_persona}"
     
     nombre_usuario = msg.get("from_name", "").strip()
@@ -110,27 +112,22 @@ def webhook():
         nombre_usuario = msg.get("sender_name", "").strip()
     if not nombre_usuario:
         nombre_usuario = msg.get("contact", {}).get("name", "").strip()
-    
     if not nombre_usuario:
         nombre_usuario = f"+{numero_persona}"
-    
-    text_obj = msg.get("text", {})
-    mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
 
     inicializar_rifa()
     rifa = obtener_rifa()
-
     respuesta = ""
 
-    # 🔐 NUEVO COMANDO DE RESET (Sin la barra diagonal)
-    if mensaje_texto.lower() == "reiniciar rifa":
-        if numero_persona == NUMERO_ADMIN:
+    # 🔐 VALIDACIÓN MEJORADA: Compara si tu NUMERO_ADMIN está metido dentro del ID del emisor
+    if comando == "reiniciar rifa":
+        if NUMERO_ADMIN in raw_from or NUMERO_ADMIN in chat_id:
             inicializar_rifa(forzar=True)
             respuesta = "🔄 *¡La rifa ha sido reseteada por el Administrador!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
         else:
             respuesta = "⚠️ Lo siento, no tienes permisos de administrador para ejecutar este comando."
 
-    elif mensaje_texto.lower() in ["hola", "buenas", "lista", "inicio", "rifa"]:
+    elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
         respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (puedes separar varios por comas, ej: *7, 14, 25*)."
 
     else:
