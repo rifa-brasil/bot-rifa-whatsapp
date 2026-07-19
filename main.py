@@ -11,7 +11,7 @@ WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K"
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR
-CLAVE_RESET = "adminresetrifa6645"
+CLAVE_RESET = "/adminresetrifa6645"
 
 DB_FILE = "rifa_db.json"
 
@@ -134,8 +134,8 @@ def webhook():
     elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
         respuesta = (
             f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n"
-            f"💵 *Compra uno o varios números por un valor de 10 reales y gana 400 reales.*\n"
-            f"🏆 El premio se entregará aquí en Brasil mediante transferencia PIX o al familiar en Cuba en CUP.\n\n"
+            f"💵 *Compra uno o varios números separados por coma(,) por un valor de 10 reales y gana 400 reales. El numero ganador sera por el resultado del Pick 3 de Florida una ves esten todos los numeros OCUPADOS. Se informará por el grupo el dia que se espere el resultado de Florida. *\n"
+            f"🏆 El premio se entregará aquí en Brasil mediante transferencia PIX o al familiar en Cuba en CUP. PRUEBA TU SUERTE\n\n"
             f"{generar_texto_lista()}\n\n"
             f"👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (puedes separar varios por comas, ej: *7, 14, 25*)."
         )
