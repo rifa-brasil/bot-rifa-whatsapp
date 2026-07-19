@@ -13,7 +13,7 @@ DB_FILE = "rifa_db.json"
 
 def inicializar_rifa():
     if not os.path.exists(DB_FILE):
-        rifa = {str(i): {"estado": "disponible", "nombre": "", "telefono": ""} for i in range(1, 101)}
+        rifa = {str(i): {"estado": "disponible", "nombre": "", "telefono": "", "enlace": ""} for i in range(1, 101)}
         with open(DB_FILE, "w") as f:
             json.dump(rifa, f, indent=4)
 
@@ -36,8 +36,13 @@ def generar_texto_lista():
             texto += f"🟢 *{num_str}*: Disponible\n"
             disponibles += 1
         else:
-            texto += f"🔴 *{num_str}*: Ocupado por {info['nombre']}\n"
-    texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
+            # Si tiene un enlace wa.me guardado, lo muestra para que sea clickeable
+            if info.get("enlace"):
+                texto += f"🔴 *{num_str}*: Ocupado por {info['nombre']} 👉 {info['enlace']}\n"
+            else:
+                texto += f"🔴 *{num_str}*: Ocupado por {info['nombre']}\n"
+            disponibles += 1
+    texto += f"\n📊 *Resumen:* Quedan {100 - disponibles} números ocupados y {disponibles} disponibles."
     return texto
 
 def enviar_mensaje_whapi(chat_id, texto):
@@ -75,23 +80,22 @@ def webhook():
     if msg.get("from_me", False):
         return "Sent by me", 200
 
-    # chat_id se usa para saber A DÓNDE responder (puede ser el ID del grupo)
     chat_id = msg.get("chat_id", "")
-    
-    # sender_id es QUIÉN escribió el mensaje (siempre es el usuario)
     sender_id = msg.get("sender_id", "")
     
-    # Extraemos el número de teléfono limpio de la persona que escribió
+    # Extraemos el número de teléfono limpio sin letras ni @
     numero_persona = sender_id.split("@")[0] if "@" in sender_id else sender_id
     if not numero_persona:
         numero_persona = chat_id.split("@")[0] if "@" in chat_id else chat_id
     
-    # Lógica mejorada para obtener el nombre del usuario
+    # Creamos el link directo a su chat privado (wa.me/numero)
+    link_directo = f"wa.me/{numero_persona}"
+    
+    # Lógica para obtener el nombre
     nombre_usuario = msg.get("sender_name", "").strip()
     if not nombre_usuario:
         nombre_usuario = msg.get("contact", {}).get("name", "").strip()
     
-    # Si la persona no tiene nombre público en WhatsApp, usamos su número de teléfono
     if not nombre_usuario:
         nombre_usuario = f"+{numero_persona}"
     
@@ -104,7 +108,7 @@ def webhook():
     respuesta = ""
 
     if mensaje_texto.lower() in ["hola", "buenas", "lista", "inicio", "rifa"]:
-        respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (ejemplo: si quieres el 7, escribe solo el número *7*)."
+        respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas."
 
     elif mensaje_texto.isdigit():
         num_elegido = int(mensaje_texto)
@@ -115,7 +119,8 @@ def webhook():
                 rifa[num_str] = {
                     "estado": "ocupado",
                     "nombre": nombre_usuario,
-                    "telefono": f"+{numero_persona}"
+                    "telefono": f"+{numero_persona}",
+                    "enlace": link_directo
                 }
                 guardar_rifa(rifa)
                 respuesta = f"✅ ¡Felicidades! El número *{num_str.zfill(2)}* ha sido reservado por {nombre_usuario}.\n\n" + generar_texto_lista()
