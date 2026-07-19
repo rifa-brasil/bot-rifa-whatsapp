@@ -10,10 +10,13 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
+# ⚠️ REPLAZA ESTO con tu número de teléfono de administrador (sin el +)
+NUMERO_ADMIN = "5511948824359" 
+
 DB_FILE = "rifa_db.json"
 
-def inicializar_rifa():
-    if not os.path.exists(DB_FILE):
+def inicializar_rifa(forzar=False):
+    if forzar or not os.path.exists(DB_FILE):
         rifa = {str(i): {"estado": "disponible", "nombre": "", "telefono": ""} for i in range(1, 101)}
         with open(DB_FILE, "w") as f:
             json.dump(rifa, f, indent=4)
@@ -88,30 +91,23 @@ def webhook():
     if msg.get("from_me", False):
         return "Sent by me", 200
 
-    # chat_id es la dirección a donde responder (en grupos es el ID del grupo)
     chat_id = msg.get("chat_id", "")
-    
-    # ESTRUCTURA DE WHAPI PARA GRUPOS: 'from' contiene el número real del participante
     raw_from = msg.get("from", "")
     
-    # Si por alguna razón 'from' no viene, usamos la parte limpia del chat_id
     if not raw_from:
         raw_from = chat_id
         
-    # Limpiamos el número quedándonos solo con los dígitos puros antes de cualquier arroba
     id_antes_del_arroba = raw_from.split("@")[0]
     numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
     
     link_directo = f"wa.me/{numero_persona}"
     
-    # Lógica para obtener el nombre público del participante
-    nombre_usuario = msg.get("from_name", "").strip()  # Whapi usa from_name en grupos
+    nombre_usuario = msg.get("from_name", "").strip()
     if not nombre_usuario:
         nombre_usuario = msg.get("sender_name", "").strip()
     if not nombre_usuario:
         nombre_usuario = msg.get("contact", {}).get("name", "").strip()
     
-    # Si el usuario no tiene nombre configurado, usamos su número con el signo +
     if not nombre_usuario:
         nombre_usuario = f"+{numero_persona}"
     
@@ -123,25 +119,64 @@ def webhook():
 
     respuesta = ""
 
-    if mensaje_texto.lower() in ["hola", "buenas", "lista", "inicio", "rifa"]:
-        respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas."
+    # 🔐 COMANDO SECRETO DE RESET
+    if mensaje_texto.lower() == "/resetear":
+        if numero_persona == NUMERO_ADMIN:
+            inicializar_rifa(forzar=True)
+            respuesta = "🔄 *¡La rifa ha sido reseteada por el Administrador!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
+        else:
+            respuesta = "⚠️ Lo siento, no tienes permisos de administrador para ejecutar este comando."
 
-    elif mensaje_texto.isdigit():
-        num_elegido = int(mensaje_texto)
-        if 1 <= num_elegido <= 100:
-            num_str = str(num_elegido)
-            info = rifa[num_str]
-            if info["estado"] == "disponible":
-                rifa[num_str] = {
-                    "estado": "ocupado",
-                    "nombre": nombre_usuario,
-                    "telefono": f"+{numero_persona}",
-                    "enlace": link_directo
-                }
+    elif mensaje_texto.lower() in ["hola", "buenas", "lista", "inicio", "rifa"]:
+        respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (puedes separar varios por comas, ej: *7, 14, 25*)."
+
+    else:
+        # LÓGICA PARA PROCESAR NÚMEROS INDIVIDUALES O SEPARADOS POR COMAS
+        # Buscamos si el mensaje tiene el formato de números (ya sea '7' o '7, 8, 9')
+        # Reemplazamos espacios y separamos por comas
+        partes = [p.strip() for p in mensaje_texto.split(",")]
+        
+        # Validamos que todas las partes sean números
+        es_lista_numeros = all(p.isdigit() for p in partes) if partes and mensaje_texto else False
+
+        if es_lista_numeros:
+            exitos = []
+            ocupados = []
+            invalidos = []
+
+            for p in partes:
+                num_elegido = int(p)
+                if 1 <= num_elegido <= 100:
+                    num_str = str(num_elegido)
+                    info = rifa[num_str]
+                    if info["estado"] == "disponible":
+                        # Lo reservamos temporalmente en memoria
+                        rifa[num_str] = {
+                            "estado": "ocupado",
+                            "nombre": nombre_usuario,
+                            "telefono": f"+{numero_persona}",
+                            "enlace": link_directo
+                        }
+                        exitos.append(num_str.zfill(2))
+                    else:
+                        ocupados.append(f"*{num_str.zfill(2)}* (de {info['nombre']})")
+                else:
+                    invalidos.append(p)
+
+            # Si se logró reservar al menos uno, guardamos los cambios en la base de datos
+            if exitos:
                 guardar_rifa(rifa)
-                respuesta = f"✅ ¡Felicidades! El número *{num_str.zfill(2)}* ha sido reservado por {nombre_usuario}.\n\n" + generar_texto_lista()
-            else:
-                respuesta = f"❌ El número *{num_str.zfill(2)}* ya está ocupado por {info['nombre']}.\n\n" + generar_texto_lista()
+
+            # Construimos la respuesta basada en el resultado de la operación
+            mensajes_resultado = []
+            if exitos:
+                mensajes_resultado.append(f"✅ ¡Felicidades! Reservaste con éxito: {', '.join(exitos)}.")
+            if ocupados:
+                mensajes_resultado.append(f"❌ Los siguientes números ya estaban ocupados: {', '.join(ocupados)}.")
+            if invalidos:
+                mensajes_resultado.append(f"⚠️ Los números fuera de rango (1 al 100) fueron ignorados: {', '.join(invalidos)}.")
+
+            respuesta = "\n".join(mensajes_resultado) + "\n\n" + generar_texto_lista()
 
     if respuesta:
         enviar_mensaje_whapi(chat_id, respuesta)
