@@ -4,12 +4,10 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Archivo local para simular la base de datos de la rifa
 DB_FILE = "rifa_db.json"
 
 def inicializar_rifa():
     if not os.path.exists(DB_FILE):
-        # Creamos los 100 números libres por defecto
         rifa = {str(i): {"estado": "disponible", "nombre": "", "telefono": ""} for i in range(1, 101)}
         with open(DB_FILE, "w") as f:
             json.dump(rifa, f, indent=4)
@@ -26,7 +24,6 @@ def generar_texto_lista():
     rifa = obtener_rifa()
     texto = "🎟️ *LISTA OFICIAL DE LA RIFA (1 al 100)* 🎟️\n\n"
     disponibles = 0
-    
     for i in range(1, 101):
         num_str = str(i).zfill(2)
         info = rifa[str(i)]
@@ -34,60 +31,74 @@ def generar_texto_lista():
             texto += f"🟢 *{num_str}*: Disponible\n"
             disponibles += 1
         else:
-            texto += f"🔴 *{num_str}*: Ocupado por {info['nombre']} ({info['telefono']})\n"
-            
+            texto += f"🔴 *{num_str}*: Ocupado por {info['nombre']}\n"
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     return texto
 
 @app.route("/", methods=["GET"])
 def home():
-    return "El servidor del bot de la Rifa está activo y corriendo en la nube.", 200
+    return "Servidor conectado con Whapi listo.", 200
 
-# Endpoint que recibirá los mensajes simulados de WhatsApp mediante un Webhook estándar
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
     if not data:
-        return jsonify({"status": "error", "message": "No data received"}), 400
-        
-    # Extraemos datos del mensaje entrante
-    telefono = data.get("from", "")
-    nombre_usuario = data.get("name", "Participante")
-    mensaje_texto = data.get("text", "").strip()
+        return "No data", 400
+
+    # Whapi envía una lista de mensajes en un array 'messages'
+    messages = data.get("messages", [])
+    if not messages:
+        return "No messages", 200
+
+    msg = messages[0]
     
+    # Evita responder a los mensajes enviados por el propio bot
+    if msg.get("from_me", False):
+        return "Sent by me", 200
+
+    # Extraer datos según el formato de Whapi
+    chat_id = msg.get("chat_id", "")  # Identificador del chat privado o grupo
+    nombre_usuario = msg.get("sender_name", "Participante")
+    
+    # Obtener el texto del mensaje
+    text_obj = msg.get("text", {})
+    mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
+
     inicializar_rifa()
     rifa = obtener_rifa()
-    
+
+    respuesta = ""
+
     # Lógica del bot
     if mensaje_texto.lower() in ["hola", "buenas", "lista", "inicio", "rifa"]:
-        respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Solo responde escribiendo el número que deseas (ejemplo: si quieres el 7, escribe solo el número *7*)."
-        return jsonify({"reply": respuesta})
-        
-    # Validamos si el usuario intenta ingresar un número del 1 al 100
-    if mensaje_texto.isdigit():
+        respuesta = f"¡Hola {nombre_usuario}! Bienvenido a la Rifa Automática. ✨\n\n" + generar_texto_lista() + "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (ejemplo: si quieres el 7, escribe solo el número *7*)."
+
+    elif mensaje_texto.isdigit():
         num_elegido = int(mensaje_texto)
         if 1 <= num_elegido <= 100:
             num_str = str(num_elegido)
             info = rifa[num_str]
-            
             if info["estado"] == "disponible":
-                # Asignamos el número al usuario
                 rifa[num_str] = {
                     "estado": "ocupado",
                     "nombre": nombre_usuario,
-                    "telefono": telefono
+                    "telefono": chat_id
                 }
                 guardar_rifa(rifa)
-                
-                respuesta = f"✅ ¡Felicidades {nombre_usuario}! Has reservado con éxito el número *{num_str.zfill(2)}*.\n\n" + generar_texto_lista()
-                return jsonify({"reply": respuesta})
+                respuesta = f"✅ ¡Felicidades {nombre_usuario}! Has reservado el número *{num_str.zfill(2)}*.\n\n" + generar_texto_lista()
             else:
-                respuesta = f"❌ Lo siento, el número *{num_str.zfill(2)}* ya fue seleccionado por {info['nombre']}. Por favor, elige otro número disponible.\n\n" + generar_texto_lista()
-                return jsonify({"reply": respuesta})
-                
-    respuesta = "⚠️ Opción no válida. Escribe *lista* para ver los números disponibles o escribe directamente el número que deseas comprar (del 1 al 100)."
-    return jsonify({"reply": respuesta})
+                respuesta = f"❌ El número *{num_str.zfill(2)}* ya está ocupado por {info['nombre']}.\n\n" + generar_texto_lista()
+
+    if respuesta:
+        # Devolvemos la respuesta estructurada para que Whapi la envíe de vuelta al mismo chat
+        return jsonify({
+            "to": chat_id,
+            "body": respuesta
+        })
+
+    return "Message not processed", 200
 
 if __name__ == "__main__":
     inicializar_rifa()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+   
