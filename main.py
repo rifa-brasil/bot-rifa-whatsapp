@@ -11,9 +11,8 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# 🔑 CONFIGURACIÓN DE SEGURIDAD DE ADMINISTRADOR
+# 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
 CLAVE_RESET = "admin.resetear.rifa.99"
-ADMIN_PHONE = "5511948824359"  # Tu número de administrador principal
 
 DB_FILE = "rifa_db.json"
 
@@ -115,7 +114,6 @@ def webhook():
     comando = mensaje_texto.lower()
 
     id_antes_del_arroba = raw_from.split("@")[0]
-    # Extraemos solo los números para procesar el remitente de forma limpia
     numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
     link_directo = f"wa.me/{numero_persona}"
     
@@ -139,16 +137,10 @@ def webhook():
 
     # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE
     elif comando.startswith("resultado de florida con"):
-        # Corrección de seguridad: Valida si el número de la persona empieza con tu ADMIN_PHONE (ignora sub-IDs de dispositivo)
-        es_admin = numero_persona.startswith(ADMIN_PHONE) or (CLAVE_RESET in mensaje_texto)
-        
-        if not es_admin:
-            return "Unauthorized user ignored", 200
-
-        # Extraemos el número que pusiste al final
+        # Extraemos solo los dígitos numéricos que escribiste al final de la frase
         numeros_encontrados = re.findall(r'\d+', comando)
         if numeros_encontrados:
-            num_ganador = str(int(numeros_encontrados[0]))
+            num_ganador = str(int(numeros_encontrados[0])) # Lo pasa a entero y luego a string para quitar ceros extras (ej: "07" -> "7")
             
             if num_ganador in rifa:
                 info_ganador = rifa[num_ganador]
@@ -158,16 +150,16 @@ def webhook():
                     telefono_ganador = info_ganador["telefono"].replace("+", "").strip()
                     chat_privado_ganador = f"{telefono_ganador}@c.us"
                     
-                    # 1. Mensaje de premiación para enviar al grupo principal
+                    # 1. Armamos el anuncio para el grupo de WhatsApp
                     respuesta = (
                         f"🎉🎉 *¡TENEMOS UN GANADOR EN LA RIFA!* 🎉🎉\n\n"
                         f"El número premiado en el tiro de la Florida fue el *{num_ganador.zfill(2)}*.\n\n"
-                        f"🥇 *¡Felicidades {nombre_ganador}!* Eres el ganador de los *400 reales* 💵✨.\n\n"
+                        f"🥇 *¡Felicidades {nombre_ganador}!* (@{telefono_ganador}) Eres el ganador de los *400 reales* 💵✨.\n\n"
                         f"📩 Le hemos enviado un mensaje privado automáticamente para coordinar su premio."
                     )
                     lista_menciones = [chat_privado_ganador]
                     
-                    # 2. Mensaje directo que se dispara directo al privado del ganador
+                    # 2. Enviamos el mensaje al PRIVADO del ganador de forma automática
                     texto_privado = (
                         f"¡Hola {nombre_ganador}! 👋\n\n"
                         f"🎉 *¡MUCHAS FELICIDADES!* 🎉\n\n"
