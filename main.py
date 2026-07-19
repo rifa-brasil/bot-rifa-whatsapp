@@ -76,7 +76,19 @@ def webhook():
         return "Sent by me", 200
 
     chat_id = msg.get("chat_id", "")
-    nombre_usuario = msg.get("sender_name", "Participante")
+    
+    # Intentar obtener el número limpio eliminando el formato de Whapi si es necesario
+    numero_limpio = chat_id.split("@")[0] if "@" in chat_id else chat_id
+    
+    # Lógica mejorada para obtener el nombre del usuario
+    nombre_usuario = msg.get("sender_name", "").strip()
+    if not nombre_usuario:
+        # Si no trae sender_name, buscamos dentro del objeto de contacto si existe
+        nombre_usuario = msg.get("contact", {}).get("name", "").strip()
+    
+    # Si sigue vacío porque no tiene nombre público, usamos su número de WhatsApp
+    if not nombre_usuario:
+        nombre_usuario = f"+{numero_limpio}"
     
     text_obj = msg.get("text", {})
     mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
@@ -98,10 +110,10 @@ def webhook():
                 rifa[num_str] = {
                     "estado": "ocupado",
                     "nombre": nombre_usuario,
-                    "telefono": chat_id
+                    "telefono": f"+{numero_limpio}"
                 }
                 guardar_rifa(rifa)
-                respuesta = f"✅ ¡Felicidades {nombre_usuario}! Has reservado el número *{num_str.zfill(2)}*.\n\n" + generar_texto_lista()
+                respuesta = f"✅ ¡Felicidades! El número *{num_str.zfill(2)}* ha sido reservado por {nombre_usuario}.\n\n" + generar_texto_lista()
             else:
                 respuesta = f"❌ El número *{num_str.zfill(2)}* ya está ocupado por {info['nombre']}.\n\n" + generar_texto_lista()
 
