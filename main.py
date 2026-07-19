@@ -15,7 +15,7 @@ WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 GRUPO_CHAT_ID = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
 # 🔐 SEGURIDAD: Tu número de administrador configurado de forma exacta
-TELEFONO_ADMINISTRADOR = "5511948824359"
+TELEFONO_ADMINISTRADOR = "+55 11 94882-4359"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
 CLAVE_RESET = "admin.resetear.rifa.99"
