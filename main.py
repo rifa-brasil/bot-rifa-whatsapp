@@ -12,7 +12,7 @@ WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K"
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
 # 🔑 COLOCA AQUÍ EL NOMBRE EXACTO DE TU GRUPO DE WHATSAPP (Tal cual aparece en tu teléfono)
-NOMBRE_DEL_GRUPO = "Rifa-Brasil. 10R" 
+NOMBRE_DEL_GRUPO = "Rifa - Brasil" 
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
 CLAVE_RESET = "admin.resetear.rifa.99"
