@@ -11,7 +11,7 @@ app = Flask(__name__)
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
-# 🔑 ID DE RESPALDO DE TU GRUPO (Asegúrate de que coincida exactamente)
+# 🔑 ID DE RESPALDO DE TU GRUPO
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
 # 🔐 FILTRO DE SEGURIDAD MÁSTER: Tu base de teléfono en São Paulo
@@ -77,6 +77,7 @@ def enviar_mensaje_whapi(chat_id, texto, menciones=[]):
         "to": chat_id,
         "body": texto
     }
+    # Solo agregamos menciones si la lista no está vacía
     if menciones:
         payload["mentions"] = menciones
 
@@ -107,16 +108,13 @@ def webhook():
 
     msg = messages[0]
     
-    # 🔍 OBTENER TEXTO E INFO DEL MENSAJE
     text_obj = msg.get("text", {})
     mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
     comando = mensaje_texto.lower()
 
-    # 🛡️ EVITAR BUCLE INFINITO
     if "lista oficial de la rifa" in comando or "participantes convocados" in comando:
         return "Bot message ignored to prevent loops", 200
 
-    # Capturamos el chat actual (puede ser el grupo o un privado)
     chat_id_actual = msg.get("chat_id", "")
     raw_from = msg.get("from", "")
     
@@ -138,9 +136,7 @@ def webhook():
     inicializar_rifa()
     rifa = obtener_rifa()
     respuesta = ""
-    lista_menciones = []
 
-    # 🔐 VALIDACIÓN DE SEGURIDAD
     es_admin_real = NUMERO_ADMIN_SEGURO in numero_persona
 
     if comando == CLAVE_RESET:
@@ -166,23 +162,21 @@ def webhook():
                     telefono_ganador = info_ganador["telefono"].replace("+", "").strip()
                     chat_privado_ganador = f"{telefono_ganador}@c.us"
                     
-                    # 🎯 ESTRATEGIA DE ENVÍO AL GRUPO: 
-                    # Si mandas el comando desde el grupo, usamos 'chat_id_actual' para asegurar el tiro.
-                    # Si lo mandas desde un chat privado, usamos el ID de respaldo.
+                    # Decidir destino: el grupo desde donde escribes o el ID guardado
                     grupo_destino = chat_id_actual if "@g.us" in chat_id_actual else GRUPO_CHAT_ID_RESPALDO
                     
+                    # 🟢 TEXTO LIMPIO SIN MENCIONES PARA EVITAR ERRORES DE ENTREGA DE WHAPI
                     texto_grupo = (
                         f"🎉🎉 *¡TENEMOS UN GANADOR EN LA RIFA!* 🎉🎉\n\n"
                         f"El número premiado en el tiro de la Florida fue el *{num_ganador.zfill(2)}*.\n\n"
-                        f"🥇 *¡Felicidades {nombre_ganador}!* (@{telefono_ganador}) Eres el ganador de los *400 reales* 💵✨.\n\n"
+                        f"🥇 *¡Felicidades {nombre_ganador}!* (+{telefono_ganador}) Eres el ganador de los *400 reales* 💵✨.\n\n"
                         f"📩 Le hemos enviado un mensaje privado automáticamente para coordinar su premio."
                     )
-                    lista_menciones = [chat_privado_ganador]
                     
-                    # Enviar al grupo oficial
-                    enviar_mensaje_whapi(grupo_destino, texto_grupo, menciones=lista_menciones)
+                    # 1️⃣ Enviar al grupo (Sin pasar lista de menciones conflictivas)
+                    enviar_mensaje_whapi(grupo_destino, texto_grupo)
                     
-                    # Enviar al privado del ganador
+                    # 2️⃣ Enviar al privado del ganador
                     texto_privado = (
                         f"¡Hola {nombre_ganador}! 👋\n\n"
                         f"🎉 *¡MUCHAS FELICIDADES!* 🎉\n\n"
@@ -253,13 +247,6 @@ def webhook():
             todos_ocupados = all(rifa[str(n)]["estado"] == "ocupado" for n in range(1, 101))
             
             if todos_ocupados:
-                telefonos_participantes = set()
-                for n in range(1, 101):
-                    tel = rifa[str(n)].get("telefono", "").replace("+", "").strip()
-                    if tel:
-                        telefonos_participantes.add(f"{tel}@c.us")
-                
-                lista_menciones = list(telefonos_participantes)
                 hora_actual_brasil = datetime.utcnow() - timedelta(hours=3)
                 hora_int = hora_actual_brasil.hour
 
@@ -271,19 +258,15 @@ def webhook():
                 respuesta_cierre = (
                     "🔥 *¡ATENCIÓN A TODOS LOS PARTICIPANTES!* 🔥\n\n"
                     "¡Todos los 100 números de la rifa han sido ocupados! El sistema se ha cerrado para nuevas compras.\n\n"
-                    f"{texto_tiro}\n\n"
-                    "👥 *Participantes convocados:* "
+                    f"{texto_tiro}"
                 )
-                
-                menciones_texto = " ".join([f"@{t.split('@')[0]}" for t in lista_menciones])
-                respuesta_cierre += menciones_texto
 
                 enviar_mensaje_whapi(chat_id_actual, respuesta)
-                enviar_mensaje_whapi(chat_id_actual, respuesta_cierre, menciones=lista_menciones)
+                enviar_mensaje_whapi(chat_id_actual, respuesta_cierre)
                 return "OK", 200
 
     if respuesta:
-        enviar_mensaje_whapi(chat_id_actual, respuesta, menciones=lista_menciones)
+        enviar_mensaje_whapi(chat_id_actual, respuesta)
 
     return "OK", 200
 
