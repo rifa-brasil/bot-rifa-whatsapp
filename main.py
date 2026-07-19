@@ -14,9 +14,6 @@ WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 # 🔑 ID REAL DE TU GRUPO DE WHATSAPP
 GRUPO_CHAT_ID = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
-# 🔐 CLAVE SECRETA DE CONTROL: Escribe esto al final para que el bot sepa que eres tú
-PIN_ADMINISTRADOR = ".admin"
-
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
 CLAVE_RESET = "admin.resetear.rifa.99"
 
@@ -112,7 +109,7 @@ def webhook():
     mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
     comando = mensaje_texto.lower()
 
-    # 🛡️ EVITAR BUCLE INFINITO: Si el mensaje contiene el título de la lista oficial, el bot sabe que lo envió él mismo y no responde
+    # 🛡️ EVITAR BUCLE INFINITO
     if "lista oficial de la rifa" in comando or "participantes convocados" in comando:
         return "Bot message ignored to prevent loops", 200
 
@@ -144,12 +141,8 @@ def webhook():
         borrar_y_recrear_base_datos()
         respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles.\n\n" + generar_texto_lista()
 
-    # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE (VALIDACIÓN POR PIN)
+    # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE (SIN FILTROS NI PIN)
     elif comando.startswith("resultado de florida con"):
-        if PIN_ADMINISTRADOR not in comando:
-            print(f"🚫 Intento de comando sin clave de administrador.")
-            return "Unauthorized", 200
-
         numeros_encontrados = re.findall(r'\d+', comando)
         if numeros_encontrados:
             num_ganador = str(int(numeros_encontrados[0]))
@@ -187,7 +180,7 @@ def webhook():
             else:
                 respuesta = "⚠️ El número ingresado no está en el rango correcto (debe ser del 1 al 100)."
         else:
-            respuesta = "⚠️ Por favor, escribe el número ganador al final de la frase. Ejemplo: *resultado de florida con 25 .admin*"
+            respuesta = "⚠️ Por favor, escribe el número ganador al final de la frase. Ejemplo: *resultado de florida con 25*"
 
     # ✨ SALUDO / LISTA
     elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
