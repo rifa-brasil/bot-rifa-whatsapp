@@ -213,7 +213,7 @@ def webhook():
                 print(f"🔴 Error interno procesando ganador: {e_ganador}")
 
         # ✨ SALUDO / LISTA
-        elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
+        elif comando in ["lista"]:
             respuesta = (
                 f"¡Hola {nombre_usuario}! Aquí tienes el estado actual de la Rifa. ✨\n\n"
                 f"💵 *Compra uno o varios números por un valor de 10 reales y gana 400 reales.*\n"
