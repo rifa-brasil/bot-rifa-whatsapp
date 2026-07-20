@@ -17,12 +17,12 @@ GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
 # 👑 1. ADMINISTRADOR GENERAL (ÚNICO AUTORIZADO A CONFIRMAR/RECHAZAR PAGOS)
 WHATSAPP_ADMIN_PHONE = "5511948824359" 
-WHATSAPP_ADMIN_CHAT_ID = f"{WHATSAPP_ADMIN_PHONE}@c.us"
+# Formato estándar de Whapi para chats privados
+WHATSAPP_ADMIN_CHAT_ID = f"{WHATSAPP_ADMIN_PHONE}@s.whatsapp.net"
 NUMERO_ADMIN_SEGURO = "48824359" # Tus últimos 8 dígitos
 
 # 🤖 2. BOT ASISTENTE ENCARGADO DE NOTIFICACIONES (+5353215119)
 BOT_ASISTENTE_PHONE = "5353215119"
-BOT_ASISTENTE_CHAT_ID = f"{BOT_ASISTENTE_PHONE}@c.us"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
 CLAVE_RESET = "admin.resetear.rifa.99"
@@ -120,10 +120,10 @@ def enviar_mensaje_whapi(chat_id, texto, menciones=[]):
     try:
         r = requests.post(WHAPI_API_URL, json=payload, headers=headers)
         print(f"📤 Envío a {chat_id}: Estado {r.status_code} -> Respuesta: {r.text}")
-        return r.status_code
+        return r.status_code == 200 or r.status_code == 201
     except Exception as e:
         print(f"🔴 Error al enviar a Whapi: {e}")
-        return None
+        return False
 
 @app.route("/", methods=["GET"])
 def home():
@@ -168,7 +168,7 @@ def webhook():
         
         respuesta = ""
 
-        # 🔒 FILTRO DE SEGURIDAD MÁSTER: Únicamente tú (+5511948824359) puedes autorizar
+        # 🔒 FILTRO DE SEGURIDAD MÁSTER
         es_admin_general = (NUMERO_ADMIN_SEGURO in numero_persona) or (WHATSAPP_ADMIN_PHONE in numero_persona)
 
         # 🔄 COMANDO RESET
@@ -181,7 +181,7 @@ def webhook():
         # ✅/❌ APROBACIÓN MANUAL EXCLUSIVA DEL ADMINISTRADOR GENERAL
         elif comando.startswith("confirmar ") or comando.startswith("rechazar "):
             if not es_admin_general:
-                print(f"⛔ DENEGADO: El número {numero_persona} no es el Administrador General (+5511948824359).")
+                print(f"⛔ DENEGADO: El número {numero_persona} no es el Administrador General.")
                 return "OK", 200
             
             partes_cmd = comando.split()
@@ -323,7 +323,7 @@ def webhook():
 
                     enviar_mensaje_whapi(chat_id_actual, txt_grupo)
 
-                    # 2. Generar notificación a tu privado con enlace listo hacia el bot
+                    # 2. Generar notificación para el Administrador General
                     link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
                     link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
 
@@ -338,8 +338,26 @@ def webhook():
                         f"🔴 *[ RECHAZAR PAGO ]*\n{link_rechazar}"
                     )
                     
-                    # Envío a tu chat de Administrador General (+5511948824359)
-                    enviar_mensaje_whapi(WHATSAPP_ADMIN_CHAT_ID, txt_admin)
+                    # Intento 1: Formato estándar Whapi (@s.whatsapp.net)
+                    exito_envio = enviar_mensaje_whapi(WHATSAPP_ADMIN_CHAT_ID, txt_admin)
+                    
+                    # Intento 2: Si falla, reintentar sólo con los dígitos
+                    if not exito_envio:
+                        print("⚠️ Reintentando envío a Admin usando solo el número sin sufijo...")
+                        exito_envio = enviar_mensaje_whapi(WHATSAPP_ADMIN_PHONE, txt_admin)
+
+                    # Fallback de emergencia: Si WhatsApp bloquea el privado, notificar al grupo
+                    if not exito_envio:
+                        print("🔴 Falló el envío al chat privado. Enviando alerta al grupo...")
+                        txt_alerta_grupo = (
+                            f"🔔 *ATENCIÓN ADMINISTRADOR* (wa.me/{WHATSAPP_ADMIN_PHONE})\n"
+                            f"Hay una nueva solicitud pendiente de aprobación (ID: `{req_id}`).\n"
+                            f"👤 Cliente: {nombre_usuario} ({nums_solicitados_txt})\n\n"
+                            f"Para responder desde este chat escribe:\n"
+                            f"👉 `confirmar {req_id}`  o  `rechazar {req_id}`"
+                        )
+                        enviar_mensaje_whapi(chat_id_actual, txt_alerta_grupo)
+
                     return "OK", 200
 
         if respuesta:
