@@ -231,15 +231,8 @@ def webhook():
                     msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Usuario:* @{numero_limpio}\n🎟️ *Números asignados:* *{nums_formatted}*\n\n¡Gracias por tu compra y mucha suerte! 🤝"
                     enviar_mensaje_whapi(grupo_origen, msg_grupo, menciones=[user_chat_id])
                     
-                    # 3. Mensaje Automático al Privado del Usuario (Redacción adaptada)
-                    msg_privado = (
-                        f"🎉 *¡Hola {user_nombre}!* 🎉\n\n"
-                        f"Soy el bot asistente de la rifa. El *Administrador General* acaba de verificar tu pago "
-                        f"y me ha pedido que te confirme tu jugada.\n\n"
-                        f"Tus números (*{nums_formatted}*) ya están registrados oficialmente a tu nombre.\n\n"
-                        f"Si tienes alguna consulta, puedes contactar al administrador aquí: wa.me/{WHATSAPP_ADMIN_PHONE}\n\n"
-                        f"¡Mucha suerte! 🍀"
-                    )
+                    # 3. Mensaje Automático al Privado del Usuario
+                    msg_privado = f"🎉 *¡Hola {user_nombre}!* 🎉\n\nTe confirmo que tu pago ha sido verificado con éxito. Tus números (*{nums_formatted}*) ya están registrados oficialmente a tu nombre en el grupo de la rifa.\n\n¡Mucha suerte! 🍀"
                     enviar_mensaje_whapi(user_chat_id, msg_privado)
  
                 elif accion == "rechazar":
@@ -375,3 +368,5 @@ def webhook():
 if __name__ == "__main__":
     inicializar_rifa()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+     
+
