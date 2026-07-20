@@ -14,8 +14,8 @@ WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 # 🔑 ID DE RESPALDO DE TU GRUPO
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
-# 🔐 FILTRO DE SEGURIDAD MÁSTER: Tu número completo de Brasil (São Paulo)
-NUMERO_ADMIN_SEGURO = "5511948824359"
+# 🔐 FILTRO DE SEGURIDAD MÁSTER: Tus últimos 8 dígitos (así reconoce con 55119..., 5511... o sin código)
+NUMERO_ADMIN_SEGURO = "48824359"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
 CLAVE_RESET = "admin.resetear.rifa.99"
@@ -126,13 +126,11 @@ def webhook():
 
         msg = messages[0]
         
-        if msg.get("from_me") is True or msg.get("outbound") is True:
-            return "Ignored", 200
-        
         text_obj = msg.get("text", {})
         mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
         comando = mensaje_texto.lower()
 
+        # 🛑 EVITAR BUCLE: Ignorar mensajes que el propio bot envió automáticamente
         if "lista oficial de la rifa" in comando or "participantes convocados" in comando or "tenemos un ganador" in comando:
             return "Ignored loop", 200
 
@@ -153,7 +151,8 @@ def webhook():
         estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
         
         respuesta = ""
-        es_admin_real = NUMERO_ADMIN_SEGURO in numero_persona
+        # Reconoce el admin si contiene la secuencia de tu número de São Paulo
+        es_admin_real = NUMERO_ADMIN_SEGURO in numero_persona or msg.get("from_me") is True or msg.get("outbound") is True
 
         # 🔄 COMANDO RESET
         if comando == CLAVE_RESET:
@@ -165,7 +164,7 @@ def webhook():
         # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE
         elif comando.startswith("resultado de florida con"):
             if not es_admin_real:
-                print(f"⛔ Intento de comando ganador rechazado. Remitente: {numero_persona}")
+                print(f"⛔ Intento de comando ganador rechazado por no ser admin.")
                 return "OK", 200
 
             try:
