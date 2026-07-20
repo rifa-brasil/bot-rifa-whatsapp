@@ -1,361 +1,371 @@
 import os
 import json
+import requests
+import re
 import uuid
-import fcntl
-import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
-
-app = Flask(name)
-
-# ========== CONFIGURACIÓN ==========
-DATA_FILE = "data.json"
-GRUPO_CHAT_ID = os.environ.get("GRUPO_CHAT_ID_RESPALDO")      # ID del grupo de la rifa
-ADMIN_CHAT_ID = os.environ.get("WHATSAPP_ADMIN_CHAT_ID")      # Administrador Brasil (quien confirma)
-BOT_PHONE = os.environ.get("BOT_ASISTENTE_PHONE")             # Número del bot (sin '+')
-
-logging.basicConfig(level=logging.INFO)
-
-# ========== PERSISTENCIA ATÓMICA ==========
-def cargar_data():
-    """Carga los datos del archivo JSON con bloqueo de lectura."""
+ 
+app = Flask(__name__)
+ 
+# 🔑 TOKEN DE WHAPI (Asegúrate de que en Whapi esté escaneado el QR del +5353215119)
+WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
+WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
+ 
+# 🔑 ID DE RESPALDO DE TU GRUPO
+GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
+ 
+# 👑 1. ADMINISTRADOR GENERAL (ÚNICO AUTORIZADO A CONFIRMAR/RECHAZAR PAGOS)
+WHATSAPP_ADMIN_PHONE = "5511948824359" 
+WHATSAPP_ADMIN_CHAT_ID = f"{WHATSAPP_ADMIN_PHONE}@s.whatsapp.net"
+NUMERO_ADMIN_SEGURO = "48824359" # Tus últimos 8 dígitos
+ 
+# 🤖 2. BOT ASISTENTE ENCARGADO (+5353215119)
+BOT_ASISTENTE_PHONE = "5353215119"
+ 
+# 🔑 CLAVE SECRETA DE ADMINISTRADOR
+CLAVE_RESET = "admin.resetear.rifa.99"
+ 
+DB_FILE = "rifa_db.json"
+ 
+def inicializar_rifa():
     try:
-        with open(DATA_FILE, 'r') as f:
-            fcntl.flock(f, fcntl.LOCK_SH)
-            data = json.load(f)
-            fcntl.flock(f, fcntl.LOCK_UN)
-            return data
-    except FileNotFoundError:
-        data = {"numeros": {}, "solicitudes_pendientes": {}}
-        guardar_data_completa(data)
-        return data
-
-def guardar_data_completa(data):
-    """Guarda los datos con bloqueo exclusivo (atómico)."""
-    with open(DATA_FILE, 'w') as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        json.dump(data, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
-        fcntl.flock(f, fcntl.LOCK_UN)
-
-# ========== FUNCIONES AUXILIARES ==========
-def generar_id_solicitud():
-    """Genera un ID único de 8 caracteres hexadecimales."""
-    return "r" + uuid.uuid4().hex[:8]
-
-def normalizar_telefono(numero):
-    """Elimina caracteres no numéricos (para usar en enlaces)."""
-    return ''.join(filter(str.isdigit, numero))
-
-def formatear_numeros(numeros):
-    """Convierte lista de enteros a string con dos dígitos."""
-    return ", ".join(str(n).zfill(2) for n in numeros)
-
-def enviar_mensaje_whapi(chat_id, texto, mencion=None):
-    """
-    Envía un mensaje por WHAPI.
-    Si se proporciona 'mencion' (teléfono), se añade una mención.
-    (Adaptar según la API real de WHAPI)
-    """
-    # Aquí iría tu implementación real con requests.post()
-    # Ejemplo:
-    # payload = {"chatId": chat_id, "text": texto, "mentions": [mencion] if mencion else []}
-    # requests.post("https://api.whapi.com/messages", json=payload)
-    logging.info(f"Mensaje a {chat_id}: {texto}")
-    if mencion:
-        logging.info(f"Con mención a: {mencion}")
-    # return True
-
-# ========== COMANDOS DEL BOT ==========
-def manejar_lista(chat_id):
-    """Envía la lista de números con estados (ocupado, pendiente, disponible)."""
-    data = cargar_data()
-    numeros = data.get("numeros", {})
-    mensaje = "🎟 *LISTA DE NÚMEROS DISPONIBLES* 🎟\n\n"
-    for i in range(1, 101):
-        estado = numeros.get(str(i), {}).get("estado", "disponible")
-        if estado == "ocupado":
-            simbolo = "🔴"
-        elif estado == "pendiente":
-            simbolo = "🟡"
-        else:
-            simbolo = "🟢"
-        mensaje += f"{simbolo} {str(i).zfill(2)}  "
-        if i % 10 == 0:
-            mensaje += "\n"
-    mensaje += "\n\n🔴 Ocupado | 🟡 Pendiente | 🟢 Disponible"
-    enviar_mensaje_whapi(chat_id, mensaje)
-
-def manejar_reserva(chat_id, numero_persona, nombre_usuario, texto):
-    """Procesa la solicitud de reserva de números."""
-    # Extraer números del mensaje (separados por espacios o comas)
-    try:
-        numeros_solicitados = []
-        for token in texto.replace(',', ' ').split():
-            try:
-                num = int(token)
-                if 1 <= num <= 100:
-                    numeros_solicitados.append(num)
-            except ValueError:
-                pass
-        if not numeros_solicitados:
-            enviar_mensaje_whapi(chat_id, "❌ Por favor, envía números válidos del 1 al 100 separados por espacios o comas.")
-            return
-    except Exception as e:
-        logging.error(f"Error al parsear números: {e}")
-        enviar_mensaje_whapi(chat_id, "❌ Formato incorrecto. Envía números del 1 al 100 separados por espacios.")
-        return
-        # Cargar datos actuales
-    data = cargar_data()
-    rifa = data.get("numeros", {})
-    ocupados = []
-    pendientes = []
-    invalidos = []
-    validos = []
-
-    for n in numeros_solicitados:
-        estado = rifa.get(str(n), {}).get("estado", "disponible")
-        if estado == "ocupado":
-            ocupados.append(n)
-        elif estado == "pendiente":
-            pendientes.append(n)
-        elif n < 1 or n > 100:
-            invalidos.append(n)
-        else:
-            validos.append(n)
-
-    # Mensajes de conflicto
-    mensajes_conflicto = []
-    if ocupados:
-        mensajes_conflicto.append(f"🔴 El/los número(s) {formatear_numeros(ocupados)} ya está(n) *OCUPADO(S)*.")
-    if pendientes:
-        mensajes_conflicto.append(f"🟡 El/los número(s) {formatear_numeros(pendientes)} está(n) *EN PROCESO DE VERIFICACIÓN* por otro participante.")
-    if invalidos:
-        mensajes_conflicto.append(f"⚠️ El/los número(s) {formatear_numeros(invalidos)} está(n) fuera del rango (1 al 100).")
-
-    # Si no hay números válidos, informar y terminar
-    if mensajes_conflicto and not validos:
-        respuesta = f"Hola {nombre_usuario}:\n" + "\n".join(mensajes_conflicto)
-        enviar_mensaje_whapi(chat_id, respuesta)
-        return
-
-    # Si hay números válidos, proceder con la reserva temporal
-    if validos:
-        req_id = generar_id_solicitud()
-        telefono_limpio = normalizar_telefono(numero_persona)
-
-        # Marcar números como pendientes
-        for n in validos:
-            rifa[str(n)] = {
-                "estado": "pendiente",
-                "solicitud_id": req_id,
-                "usuario": nombre_usuario,
-                "telefono": telefono_limpio
+        if not os.path.exists(DB_FILE):
+            data_inicial = {
+                "estado_rifa": "activa",
+                "numeros": {str(i): {"estado": "disponible", "nombre": "", "telefono": "", "enlace": "", "solicitud_id": ""} for i in range(1, 101)},
+                "solicitudes_pendientes": {}
             }
-
-        # Guardar la solicitud en el diccionario de pendientes
-        solicitudes = data.get("solicitudes_pendientes", {})
-        solicitudes[req_id] = {
-            "nombre": nombre_usuario,
-            "telefono": telefono_limpio,
-            "numeros": validos,
-            "grupo_id": chat_id if "@g.us" in chat_id else GRUPO_CHAT_ID,
-            "fecha": str(datetime.now())
-        }
-        data["numeros"] = rifa
-        data["solicitudes_pendientes"] = solicitudes
-        guardar_data_completa(data)
-
-        # Notificar al usuario (en el mismo chat) que está en proceso
-        nums_txt = formatear_numeros(validos)
-        msg_usuario = (
-            f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
-            f"Hola {nombre_usuario}, recibimos tu pedido para el/los número(s): *{nums_txt}*.\n\n"
-            f"🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu transferencia.\n"
-            f"Te notificaremos tan pronto se confirme o rechace."
-        )
-        if mensajes_conflicto:
-            msg_usuario += "\n\n📌 *Nota:* " + " ".join(mensajes_conflicto)
-        enviar_mensaje_whapi(chat_id, msg_usuario)
-
-        # Enviar mensaje al administrador (Brasil) con enlaces de confirmación/rechazo
-        link_confirmar = f"wa.me/{BOT_PHONE}?text=confirmar%20{req_id}"
-        link_rechazar = f"wa.me/{BOT_PHONE}?text=rechazar%20{req_id}"
-
-        txt_admin = (
-            f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: {req_id})\n\n"
-            f"👤 *Cliente:* {nombre_usuario}\n"
-            f"📱 *Teléfono:* wa.me/{telefono_limpio}\n"
-            f"🎟 *Números:* *{nums_txt}*\n\n"
-            f"-----------------------------------\n"
-            f"Toca una opción para responder:\n\n"
-            f"🟢 *[ CONFIRMAR PAGO ]*\n{link_confirmar}\n\n"
-            f"🔴 *[ RECHAZAR PAGO ]*\n{link_rechazar}"
-        )
-        enviar_mensaje_whapi(ADMIN_CHAT_ID, txt_admin)
-
-def manejar_confirmar(chat_id, req_id):
-    """Confirma una solicitud: marca números como ocupados y notifica."""
-    data = cargar_data()
-    solicitudes = data.get("solicitudes_pendientes", {})
-    if req_id not in solicitudes:
-        enviar_mensaje_whapi(chat_id, f"❌ Solicitud {req_id} no encontrada o ya fue procesada.")
-        return
-        solicitud = solicitudes[req_id]
-    numeros = solicitud["numeros"]
-    nombre_usuario = solicitud["nombre"]
-    telefono_usuario = solicitud["telefono"]  # sin '+'
-    grupo_id = solicitud["grupo_id"]
-
-    # Marcar números como ocupados en la rifa
-    rifa = data.get("numeros", {})
-    for n in numeros:
-        if str(n) in rifa:
-            rifa[str(n)]["estado"] = "ocupado"
-            # Opcional: limpiar solicitud_id para no dejar rastro
-            rifa[str(n)].pop("solicitud_id", None)
-
-    # Eliminar la solicitud pendiente
-    del solicitudes[req_id]
-    data["numeros"] = rifa
-    data["solicitudes_pendientes"] = solicitudes
-    guardar_data_completa(data)
-
-    # ---- 1) Mensaje al GRUPO (solo confirmación, con mención) ----
-    nums_txt = formatear_numeros(numeros)
-    # Intentamos mencionar usando @ y el número de teléfono (sin '+').
-    # En WhatsApp, para mencionar, la API suele requerir el ID del contacto o el número con @c.us.
-    # Aquí usamos el formato común: @<número> (la API lo convertirá).
-    mensaje_grupo = (
-        f"✅ *¡JUGADA CONFIRMADA!* ✅\n\n"
-        f"👤 @{telefono_usuario} ({nombre_usuario}) ha confirmado su participación.\n"
-        f"🎟 Números: *{nums_txt}*\n\n"
-        f"🔴 Ahora están marcados como *OCUPADOS*. ¡Suerte!"
-    )
-    # Enviar al grupo (puedes pasar el teléfono como mención si la API lo soporta)
-    enviar_mensaje_whapi(grupo_id, mensaje_grupo, mencion=telefono_usuario)
-
-    # ---- 2) Mensaje PRIVADO al usuario ----
-    # Para enviar un mensaje privado, necesitamos el chat_id del usuario (su número con @c.us o similar).
-    # Asumimos que el número de teléfono es suficiente si la API permite enviar a un número.
-    chat_privado = telefono_usuario + "@c.us"  # Formato típico de WhatsApp
-    mensaje_privado = (
-        f"🎉 *¡Tu jugada ha sido CONFIRMADA!* 🎉\n\n"
-        f"Hola {nombre_usuario}, el administrador ha verificado tu pago.\n"
-        f"Tus números: *{nums_txt}* ahora están *OFICIALMENTE OCUPADOS*.\n\n"
-        f"🔴 Quedan registrados a tu nombre. ¡Mucha suerte!"
-    )
-    enviar_mensaje_whapi(chat_privado, mensaje_privado)
-
-    # Opcional: confirmar al administrador que se realizó
-    enviar_mensaje_whapi(chat_id, f"✅ Solicitud {req_id} confirmada exitosamente.")
-
-def manejar_rechazar(chat_id, req_id):
-    """Rechaza una solicitud: libera los números y notifica."""
-    data = cargar_data()
-    solicitudes = data.get("solicitudes_pendientes", {})
-    if req_id not in solicitudes:
-        enviar_mensaje_whapi(chat_id, f"❌ Solicitud {req_id} no encontrada o ya fue procesada.")
-        return
-
-    solicitud = solicitudes[req_id]
-    numeros = solicitud["numeros"]
-    nombre_usuario = solicitud["nombre"]
-    telefono_usuario = solicitud["telefono"]
-    grupo_id = solicitud["grupo_id"]
-
-    # Liberar números (eliminar estado pendiente)
-    rifa = data.get("numeros", {})
-    for n in numeros:
-        if str(n) in rifa and rifa[str(n)].get("estado") == "pendiente":
-            # Volver a disponible
-            rifa[str(n)] = {"estado": "disponible"}  # o eliminar la entrada
-            # Si quieres eliminar completamente: del rifa[str(n)]
-
-    # Eliminar la solicitud
-    del solicitudes[req_id]
-    data["numeros"] = rifa
-    data["solicitudes_pendientes"] = solicitudes
-    guardar_data_completa(data)
-
-    # Notificar al grupo (opcional)
-    nums_txt = formatear_numeros(numeros)
-    mensaje_grupo = (
-        f"❌ *JUGADA RECHAZADA* ❌\n\n"
-        f"La solicitud de {nombre_usuario} para los números *{nums_txt}* ha sido rechazada.\n"
-        f"Los números quedan disponibles nuevamente."
-    )
-    enviar_mensaje_whapi(grupo_id, mensaje_grupo)
-
-    # Notificar al usuario por privado
-    chat_privado = telefono_usuario + "@c.us"
-    mensaje_privado = (
-        f"❌ *Tu solicitud ha sido RECHAZADA* ❌\n\n"
-    f"Hola {nombre_usuario}, el administrador no pudo verificar tu pago.\n"
-        f"Tus números *{nums_txt}* han sido liberados y están disponibles para otros.\n"
-        f"Si crees que es un error, contacta al administrador."
-    )
-    enviar_mensaje_whapi(chat_privado, mensaje_privado)
-
-    enviar_mensaje_whapi(chat_id, f"❌ Solicitud {req_id} rechazada.")
-
-# ========== WEBHOOK PRINCIPAL ==========
+            with open(DB_FILE, "w") as f:
+                json.dump(data_inicial, f, indent=4)
+    except Exception as e:
+        print(f"🔴 Error al inicializar JSON: {e}")
+ 
+def borrar_y_recrear_base_datos():
+    try:
+        if os.path.exists(DB_FILE):
+            os.remove(DB_FILE)
+    except Exception as e:
+        print(f"Error al eliminar archivo: {e}")
+    inicializar_rifa()
+ 
+def obtener_data_completa():
+    inicializar_rifa()
+    try:
+        with open(DB_FILE, "r") as f:
+            data = json.load(f)
+            if "estado_rifa" not in data:
+                data["estado_rifa"] = "activa"
+            if "solicitudes_pendientes" not in data:
+                data["solicitudes_pendientes"] = {}
+            return data
+    except Exception as e:
+        print(f"🔴 Error al leer JSON (recreando base): {e}")
+        borrar_y_recrear_base_datos()
+        with open(DB_FILE, "r") as f:
+            return json.load(f)
+ 
+def guardar_data_completa(data):
+    try:
+        with open(DB_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"🔴 Error al guardar JSON: {e}")
+ 
+def generar_texto_lista():
+    data = obtener_data_completa()
+    rifa = data["numeros"]
+    texto = "🎟️ *LISTA OFICIAL DE LA RIFA (1 al 100)* 🎟️\n\n"
+    disponibles = 0
+    for i in range(1, 101):
+        num_str = str(i).zfill(2)
+        info = rifa[str(i)]
+        estado = info.get("estado", "disponible")
+ 
+        if estado == "disponible":
+            texto += f"🟢 *{num_str}*: Disponible\n"
+            disponibles += 1
+        elif estado == "pendiente":
+            texto += f"🟡 *{num_str}*: En verificación de pago...\n"
+        else:
+            if info.get("enlace"):
+                link = info["enlace"]
+            elif info.get("telefono"):
+                tel_limpio = info["telefono"].replace("+", "").strip()
+                link = f"wa.me/{tel_limpio}"
+            else:
+                link = ""
+ 
+            if link:
+                texto += f"🔴 *{num_str}*: Ocupado por {info['nombre']} 👉 {link}\n"
+            else:
+                texto += f"🔴 *{num_str}*: Ocupado por {info['nombre']}\n"
+            
+    texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
+    if data.get("estado_rifa") == "finalizada":
+        texto += "\n\n🔒 *ESTADO:* Rifa cerrada/finalizada. No se permiten más modificaciones."
+    return texto
+ 
+def enviar_mensaje_whapi(chat_id, texto, menciones=[]):
+    payload = {"to": chat_id, "body": texto}
+    if menciones:
+        payload["mentions"] = menciones
+ 
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "authorization": f"Bearer {WHAPI_TOKEN}"
+    }
+    try:
+        r = requests.post(WHAPI_API_URL, json=payload, headers=headers)
+        print(f"📤 Envío a {chat_id}: Estado {r.status_code} -> Respuesta: {r.text}")
+        return r.status_code == 200 or r.status_code == 201
+    except Exception as e:
+        print(f"🔴 Error al enviar a Whapi: {e}")
+        return False
+ 
+@app.route("/", methods=["GET"])
+def home():
+    return "Servidor conectado con Whapi listo.", 200
+ 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        data_in = request.get_json()
-        if not data_in:
-            return jsonify({"status": "error", "message": "No data"}), 400
+        data_webhook = request.get_json()
+        if not data_webhook:
+            return "No data", 200
+ 
+        messages = data_webhook.get("messages", [])
+        if not messages:
+            return "No messages", 200
+ 
+        msg = messages[0]
+        
+        text_obj = msg.get("text", {})
+        mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
+        comando = mensaje_texto.lower()
+ 
+        # 🛑 EVITAR BUCLE DE AUTO-RESPUESTA
+        if "lista oficial de la rifa" in comando or "participantes convocados" in comando or "tenemos un ganador" in comando:
+            return "Ignored loop", 200
+ 
+        chat_id_actual = msg.get("chat_id", "")
+        raw_from = msg.get("from", "")
+        
+        if not raw_from:
+            raw_from = msg.get("sender_id", chat_id_actual)
+ 
+        id_antes_del_arroba = raw_from.split("@")[0]
+        numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
+        
+        nombre_usuario = msg.get("from_name", "").strip() or msg.get("sender_name", "").strip() or f"+{numero_persona}"
+ 
+        data_rifa = obtener_data_completa()
+        rifa = data_rifa["numeros"]
+        solicitudes = data_rifa.get("solicitudes_pendientes", {})
+        estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
+        
+        respuesta = ""
+ 
+        # 🔒 FILTRO MÁSTER DE SEGURIDAD (Exclusivo para ti +5511948824359)
+        es_admin_general = (NUMERO_ADMIN_SEGURO in numero_persona) or (WHATSAPP_ADMIN_PHONE in numero_persona)
+ 
+        # 🔄 COMANDO RESET
+        if comando == CLAVE_RESET:
+            if not es_admin_general:
+                return "OK", 200
+            borrar_y_recrear_base_datos()
+            respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles y el sistema está abierto.\n\n" + generar_texto_lista()
+ 
+        # ✅/❌ APROBACIÓN MANUAL (BÚSQUEDA FLEXIBLE DE ID)
+        elif comando.startswith("confirmar ") or comando.startswith("rechazar "):
+            if not es_admin_general:
+                print(f"⛔ DENEGADO: El número {numero_persona} no es el Administrador General.")
+                return "OK", 200
+            
+            partes_cmd = mensaje_texto.strip().split()
+            accion = partes_cmd[0].lower()
+            req_id_input = partes_cmd[1].strip() if len(partes_cmd) > 1 else ""
+ 
+            # Buscar la clave coincidente ignorando mayúsculas/minúsculas
+            req_id_encontrado = None
+            for key in solicitudes.keys():
+                if key.lower() == req_id_input.lower():
+                    req_id_encontrado = key
+                    break
+ 
+            if req_id_encontrado:
+                sol = solicitudes[req_id_encontrado]
+                user_nombre = sol["nombre"]
+                user_phone = sol["telefono"]
+                user_nums = sol["numeros"]
+                grupo_origen = sol["grupo_id"]
+ 
+                nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
+ 
+                if accion == "confirmar":
+                    for n in user_nums:
+                        rifa[n]["estado"] = "ocupado"
+                        rifa[n]["nombre"] = user_nombre
+                        rifa[n]["telefono"] = user_phone
+                        rifa[n]["enlace"] = f"wa.me/{user_phone.replace('+', '').strip()}"
+ 
+                    del solicitudes[req_id_encontrado]
+                    data_rifa["numeros"] = rifa
+                    data_rifa["solicitudes_pendientes"] = solicitudes
+ 
+                    todos_ocupados = all(rifa[str(n)]["estado"] == "ocupado" for n in range(1, 101))
+                    if todos_ocupados:
+                        data_rifa["estado_rifa"] = "finalizada"
+ 
+                    guardar_data_completa(data_rifa)
+ 
+                    # 🔹 PREPARAR ID Y NÚMERO DEL USUARIO PARA MENCIÓN Y MENSAJE PRIVADO
+                    numero_limpio = user_phone.replace("+", "").strip()
+                    user_chat_id = f"{numero_limpio}@s.whatsapp.net"
 
-        # Extraer información del mensaje (adaptar según WHAPI)
-        # Suponemos que el payload contiene: chatId, from, body, etc.
-        chat_id = data_in.get("chatId")
-        from_number = data_in.get("from")  # número del remitente
-        body = data_in.get("body", "").strip()
-        sender_name = data_in.get("pushName", "Usuario")  # nombre del contacto
+                    # 1. Respuesta al Administrador (Para ti)
+                    enviar_mensaje_whapi(chat_id_actual, f"✅ *Solicitud {req_id_encontrado} APROBADA.* Los números ({nums_formatted}) fueron asignados exitosamente a {user_nombre}.")
 
-        if not chat_id or not body:
-            return jsonify({"status": "ok"}), 200
-
-        # Comandos
-        if body.lower() == "lista":
-            manejar_lista(chat_id)
-
-        elif body.lower().startswith("confirmar "):
-            partes = body.split()
-            if len(partes) == 2:
-                req_id = partes[1]
-                manejar_confirmar(chat_id, req_id)
+                    # 2. Notificación Oficial al Grupo (Mencionando al usuario y SIN la lista completa)
+                    msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Usuario:* @{numero_limpio}\n🎟️ *Números asignados:* *{nums_formatted}*\n\n¡Gracias por tu compra y mucha suerte! 🤝"
+                    enviar_mensaje_whapi(grupo_origen, msg_grupo, menciones=[user_chat_id])
+                    
+                    # 3. Mensaje Automático al Privado del Usuario
+                    msg_privado = f"🎉 *¡Hola {user_nombre}!* 🎉\n\nTe confirmo que tu pago ha sido verificado con éxito. Tus números (*{nums_formatted}*) ya están registrados oficialmente a tu nombre en el grupo de la rifa.\n\n¡Mucha suerte! 🍀"
+                    enviar_mensaje_whapi(user_chat_id, msg_privado)
+ 
+                elif accion == "rechazar":
+                    for n in user_nums:
+                        rifa[n] = {"estado": "disponible", "nombre": "", "telefono": "", "enlace": "", "solicitud_id": ""}
+ 
+                    del solicitudes[req_id_encontrado]
+                    data_rifa["numeros"] = rifa
+                    data_rifa["solicitudes_pendientes"] = solicitudes
+                    guardar_data_completa(data_rifa)
+ 
+                    enviar_mensaje_whapi(chat_id_actual, f"❌ *Solicitud {req_id_encontrado} RECHAZADA.* Los números ({nums_formatted}) vuelven a estar disponibles.")
+ 
+                    # Notificación de cancelación al grupo
+                    msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola {user_nombre}, tu solicitud para el/los número(s) *{nums_formatted}* fue rechazada. Los números vuelven a estar 🟢 *Disponibles* para los demás participantes."
+                    enviar_mensaje_whapi(grupo_origen, msg_grupo)
+ 
             else:
-                enviar_mensaje_whapi(chat_id, "❌ Formato incorrecto. Usa: confirmar <ID>")
-
-        elif body.lower().startswith("rechazar "):
-            partes = body.split()
-            if len(partes) == 2:
-                req_id = partes[1]
-                manejar_rechazar(chat_id, req_id)
-            else:
-                enviar_mensaje_whapi(chat_id, "❌ Formato incorrecto. Usa: rechazar <ID>")
-
+                enviar_mensaje_whapi(chat_id_actual, f"⚠️ No se encontró la solicitud ID: `{req_id_input}` o ya fue procesada.")
+            return "OK", 200
+ 
+        # ✨ SALUDO / LISTA
+        elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
+            respuesta = (
+                f"¡Hola {nombre_usuario}! Aquí tienes el estado actual de la Rifa. ✨\n\n"
+                f"💵 *Compra uno o varios números por un valor de 10 reales y gana 400 reales.*\n"
+                f"🏆 El premio se entregará aquí en Brasil mediante transferencia PIX o al familiar en Cuba en CUP.\n\n"
+                f"{generar_texto_lista()}"
+            )
+            if estado_actual_rifa == "activa":
+                respuesta += "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (ej: *7, 14*)."
+ 
+        # 🛒 PROCESO DE RESERVAS DE NÚMEROS
         else:
-            # Si no es un comando, asumimos que es una solicitud de números
-            # Solo procesamos si el mensaje contiene números
-            if any(c.isdigit() for c in body):
-                manejar_reserva(chat_id, from_number, sender_name, body)
-            else:
-                # Mensaje no reconocido (opcional)
-                enviar_mensaje_whapi(chat_id, "❌ No te entiendo. Envía 'lista' para ver disponibles o números para reservar.")
-
-        return jsonify({"status": "ok"}), 200
-
-    except Exception as e:
-        logging.error(f"Error en webhook: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-# ========== INICIO ==========
-if name == "main":
-    # Asegurar que existe el archivo de datos
-    cargar_data()
+            partes = [p.strip() for p in mensaje_texto.split(",")]
+            es_lista_numeros = all(p.isdigit() for p in partes) if partes and mensaje_texto else False
+ 
+            if es_lista_numeros:
+                if estado_actual_rifa == "finalizada":
+                    respuesta = "🔒 *Lo sentimos, el sistema está cerrado.* El sorteo ya concluyó o está congelado."
+                    enviar_mensaje_whapi(chat_id_actual, respuesta)
+                    return "OK", 200
+ 
+                ocupados, pendientes, validos_para_reservar, invalidos = [], [], [], []
+ 
+                for p in partes:
+                    num_elegido = int(p)
+                    if 1 <= num_elegido <= 100:
+                        num_str = str(num_elegido)
+                        info = rifa[num_str]
+                        est = info.get("estado", "disponible")
+ 
+                        if est == "ocupado":
+                            ocupados.append(f"*{num_str.zfill(2)}*")
+                        elif est == "pendiente":
+                            pendientes.append(f"*{num_str.zfill(2)}*")
+                        else:
+                            validos_para_reservar.append(num_str)
+                    else:
+                        invalidos.append(p)
+ 
+                mensajes_conflicto = []
+                if ocupados:
+                    mensajes_conflicto.append(f"🔴 El/los número(s) {', '.join(ocupados)} ya está(n) *OCUPADO(S)*.")
+                if pendientes:
+                    mensajes_conflicto.append(f"🟡 El/los número(s) {', '.join(pendientes)} está(n) *EN PROCESO DE VERIFICACIÓN DE PAGO* por otro participante.")
+                if invalidos:
+                    mensajes_conflicto.append(f"⚠️ El/los número(s) {', '.join(invalidos)} está(n) fuera del rango (1 al 100).")
+ 
+                if mensajes_conflicto and not validos_para_reservar:
+                    respuesta = f"Hola {nombre_usuario}:\n" + "\n".join(mensajes_conflicto)
+                    enviar_mensaje_whapi(chat_id_actual, respuesta)
+                    return "OK", 200
+ 
+                if validos_para_reservar:
+                    # Generar ID en minúsculas para evitar descalce
+                    req_id = "r" + str(uuid.uuid4().int)[:4]
+ 
+                    for n in validos_para_reservar:
+                        rifa[n]["estado"] = "pendiente"
+                        rifa[n]["solicitud_id"] = req_id
+ 
+                    solicitudes[req_id] = {
+                        "nombre": nombre_usuario,
+                        "telefono": f"+{numero_persona}",
+                        "numeros": validos_para_reservar,
+                        "grupo_id": chat_id_actual if "@g.us" in chat_id_actual else GRUPO_CHAT_ID_RESPALDO
+                    }
+ 
+                    data_rifa["numeros"] = rifa
+                    data_rifa["solicitudes_pendientes"] = solicitudes
+                    guardar_data_completa(data_rifa)
+ 
+                    nums_solicitados_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
+ 
+                    # 1. Notificar en el grupo
+                    txt_grupo = (
+                        f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
+                        f"Hola {nombre_usuario}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
+                        f"🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu transferencia."
+                    )
+                    if mensajes_conflicto:
+                        txt_grupo += "\n\n📌 *Nota:* " + " \n".join(mensajes_conflicto)
+ 
+                    enviar_mensaje_whapi(chat_id_actual, txt_grupo)
+ 
+                    # 2. Notificación al chat privado del Administrador General (+5511948824359)
+                    link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
+                    link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
+ 
+                    txt_admin = (
+                        f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
+                        f"👤 *Cliente:* {nombre_usuario}\n"
+                        f"📱 *Teléfono:* wa.me/{numero_persona}\n"
+                        f"🎟️ *Números:* *{nums_solicitados_txt}*\n\n"
+                        f"-----------------------------------\n"
+                        f"Toca una opción para responder:\n\n"
+                        f"🟢 *[ CONFIRMAR PAGO ]*\n{link_confirmar}\n\n"
+                        f"🔴 *[ RECHAZAR PAGO ]*\n{link_rechazar}"
+                    )
+                    
+                    enviar_mensaje_whapi(WHATSAPP_ADMIN_CHAT_ID, txt_admin)
+                    return "OK", 200
+ 
+        if respuesta:
+            enviar_mensaje_whapi(chat_id_actual, respuesta)
+ 
+    except Exception as e_global:
+        print(f"💥 ERROR CRÍTICO: {e_global}")
+ 
+    return "OK", 200
+ 
+if __name__ == "__main__":
+    inicializar_rifa()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
     
