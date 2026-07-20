@@ -20,7 +20,7 @@ WHATSAPP_ADMIN_PHONE = "5511948824359"
 WHATSAPP_ADMIN_CHAT_ID = f"{WHATSAPP_ADMIN_PHONE}@c.us"
 NUMERO_ADMIN_SEGURO = "48824359" # Tus últimos 8 dígitos
 
-# 🤖 2. BOT ASISTENTE ENCARGADO DE NOTIFICACIONES
+# 🤖 2. BOT ASISTENTE ENCARGADO DE NOTIFICACIONES (+5353215119)
 BOT_ASISTENTE_PHONE = "5353215119"
 BOT_ASISTENTE_CHAT_ID = f"{BOT_ASISTENTE_PHONE}@c.us"
 
@@ -120,8 +120,10 @@ def enviar_mensaje_whapi(chat_id, texto, menciones=[]):
     try:
         r = requests.post(WHAPI_API_URL, json=payload, headers=headers)
         print(f"📤 Envío a {chat_id}: Estado {r.status_code} -> Respuesta: {r.text}")
+        return r.status_code
     except Exception as e:
         print(f"🔴 Error al enviar a Whapi: {e}")
+        return None
 
 @app.route("/", methods=["GET"])
 def home():
@@ -237,55 +239,6 @@ def webhook():
                 enviar_mensaje_whapi(chat_id_actual, f"⚠️ No se encontró la solicitud ID: `{req_id}` o ya fue procesada.")
             return "OK", 200
 
-        # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE
-        elif comando.startswith("resultado de florida con"):
-            if not es_admin_general:
-                return "OK", 200
-
-            try:
-                numeros_encontrados = re.findall(r'\d+', comando)
-                if numeros_encontrados:
-                    num_ganador = str(int(numeros_encontrados[0]))
-                    
-                    if num_ganador in rifa:
-                        info_ganador = rifa[num_ganador]
-                        
-                        if info_ganador["estado"] == "ocupado":
-                            nombre_ganador = info_ganador["nombre"]
-                            telefono_ganador = info_ganador["telefono"].replace("+", "").strip()
-                            chat_privado_ganador = f"{telefono_ganador}@c.us"
-                            
-                            grupo_destino = chat_id_actual if "@g.us" in chat_id_actual else GRUPO_CHAT_ID_RESPALDO
-                            
-                            data_rifa["estado_rifa"] = "finalizada"
-                            guardar_data_completa(data_rifa)
-                            
-                            texto_grupo = (
-                                f"🎉🎉 *¡TENEMOS UN GANADOR EN LA RIFA!* 🎉🎉\n\n"
-                                f"El número premiado en el tiro de la Florida fue el *{num_ganador.zfill(2)}*.\n\n"
-                                f"🥇 *¡Felicidades {nombre_ganador}!* (+{telefono_ganador}) Eres el ganador de los *400 reales* 💵✨.\n\n"
-                                f"🔒 *La lista ha sido cerrada de forma definitiva.*"
-                            )
-                            enviar_mensaje_whapi(grupo_destino, texto_grupo)
-                            
-                            texto_privado = (
-                                f"¡Hola {nombre_ganador}! 👋\n\n"
-                                f"🎉 *¡MUCHAS FELICIDADES!* 🎉\n\n"
-                                f"Tu número *{num_ganador.zfill(2)}* salió premiado en el resultado de la Florida y has ganado los *400 reales* de la rifa. 🏆💵\n\n"
-                                f"👉 Por favor, ponte en contacto con el administrador lo antes posible para coordinar tu pago."
-                            )
-                            enviar_mensaje_whapi(chat_privado_ganador, texto_privado)
-                        else:
-                            respuesta = f"🎫 El número *{num_ganador.zfill(2)}* salió premiado en la Florida, pero lamentablemente quedó *Disponible*.\n\n🔒 La rifa se ha dado por finalizada."
-                            data_rifa["estado_rifa"] = "finalizada"
-                            guardar_data_completa(data_rifa)
-                    else:
-                        respuesta = "⚠️ El número ingresado no está en el rango correcto (1 al 100)."
-                else:
-                    respuesta = "⚠️ Por favor, escribe el número ganador al final de la frase."
-            except Exception as e_ganador:
-                print(f"🔴 Error interno procesando ganador: {e_ganador}")
-
         # ✨ SALUDO / LISTA
         elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
             respuesta = (
@@ -370,7 +323,7 @@ def webhook():
 
                     enviar_mensaje_whapi(chat_id_actual, txt_grupo)
 
-                    # 2. Generar notificación dirigida EXCLUSIVAMENTE a tu chat privado (+5511948824359)
+                    # 2. Generar notificación a tu privado con enlace listo hacia el bot
                     link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
                     link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
 
@@ -385,7 +338,7 @@ def webhook():
                         f"🔴 *[ RECHAZAR PAGO ]*\n{link_rechazar}"
                     )
                     
-                    # Se envía a tu número de Administrador General (+5511948824359)
+                    # Envío a tu chat de Administrador General (+5511948824359)
                     enviar_mensaje_whapi(WHATSAPP_ADMIN_CHAT_ID, txt_admin)
                     return "OK", 200
 
@@ -393,7 +346,7 @@ def webhook():
             enviar_mensaje_whapi(chat_id_actual, respuesta)
 
     except Exception as e_global:
-        print(f"💥 ERROR CRÍTICO CRASH EVITADO: {e_global}")
+        print(f"💥 ERROR CRÍTICO: {e_global}")
 
     return "OK", 200
 
