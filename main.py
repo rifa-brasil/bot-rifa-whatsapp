@@ -150,7 +150,6 @@ def webhook():
 
         id_antes_del_arroba = raw_from.split("@")[0]
         numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
-        link_directo = f"wa.me/{numero_persona}"
         
         nombre_usuario = msg.get("from_name", "").strip() or msg.get("sender_name", "").strip() or f"+{numero_persona}"
 
@@ -169,7 +168,7 @@ def webhook():
             borrar_y_recrear_base_datos()
             respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles y el sistema está abierto.\n\n" + generar_texto_lista()
 
-        # ✅/❌ APROBACIÓN MANUAL DEL ADMINISTRADOR
+        # ✅/❌ APROBACIÓN MANUAL DEL ADMINISTRADOR CON ENLACES
         elif comando.startswith("confirmar ") or comando.startswith("rechazar "):
             if not es_admin_real:
                 return "OK", 200
@@ -188,7 +187,7 @@ def webhook():
                 nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
 
                 if accion == "confirmar":
-                    # Pasar de pendiente a ocupado definitivamente
+                    # Asignar definitivamente
                     for n in user_nums:
                         rifa[n]["estado"] = "ocupado"
                         rifa[n]["nombre"] = user_nombre
@@ -199,14 +198,12 @@ def webhook():
                     data_rifa["numeros"] = rifa
                     data_rifa["solicitudes_pendientes"] = solicitudes
 
-                    # Verificar si la lista se completó (100 ocupados)
                     todos_ocupados = all(rifa[str(n)]["estado"] == "ocupado" for n in range(1, 101))
                     if todos_ocupados:
                         data_rifa["estado_rifa"] = "finalizada"
 
                     guardar_data_completa(data_rifa)
 
-                    # Confirmar al administrador
                     enviar_mensaje_whapi(chat_id_actual, f"✅ *Solicitud {req_id} APROBADA.* Los números ({nums_formatted}) fueron asignados a {user_nombre}.")
 
                     # Notificar al Grupo
@@ -214,7 +211,7 @@ def webhook():
                     enviar_mensaje_whapi(grupo_origen, msg_grupo)
 
                 elif accion == "rechazar":
-                    # Liberar los números nuevamente
+                    # Liberar números
                     for n in user_nums:
                         rifa[n] = {"estado": "disponible", "nombre": "", "telefono": "", "enlace": "", "solicitud_id": ""}
 
@@ -223,11 +220,10 @@ def webhook():
                     data_rifa["solicitudes_pendientes"] = solicitudes
                     guardar_data_completa(data_rifa)
 
-                    # Confirmar al administrador
                     enviar_mensaje_whapi(chat_id_actual, f"❌ *Solicitud {req_id} RECHAZADA.* Los números ({nums_formatted}) vuelven a estar disponibles.")
 
                     # Notificar al Grupo
-                    msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola {user_nombre}, tu solicitud para el/los número(s) *{nums_formatted}* no ha sido aprobada. Los números vuelven a estar 🟢 *Disponibles* para los demás participantes."
+                    msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola {user_nombre}, tu solicitud para el/los número(s) *{nums_formatted}* fue rechazada. Los números vuelven a estar 🟢 *Disponibles* para los demás participantes."
                     enviar_mensaje_whapi(grupo_origen, msg_grupo)
 
             else:
@@ -294,7 +290,7 @@ def webhook():
             if estado_actual_rifa == "activa":
                 respuesta += "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (ej: *7, 14*)."
 
-        # 🛒 PROCESO DE RESERVAS DE NÚMEROS (CON VERIFICACIÓN Y PENDIENTES)
+        # 🛒 PROCESO DE RESERVAS DE NÚMEROS (CON ENLACES DE ACCIÓN RÁPIDA AL ADMIN)
         else:
             partes = [p.strip() for p in mensaje_texto.split(",")]
             es_lista_numeros = all(p.isdigit() for p in partes) if partes and mensaje_texto else False
@@ -323,32 +319,26 @@ def webhook():
                     else:
                         invalidos.append(p)
 
-                # Si intentó pedir números que ya están ocupados o en proceso
                 mensajes_conflicto = []
                 if ocupados:
-                    mensajes_conflicto.append(f"🔴 El/los número(s) {', '.join(ocupados)} ya está(n) *OCUPADO(S)* por otro participante.")
+                    mensajes_conflicto.append(f"🔴 El/los número(s) {', '.join(ocupados)} ya está(n) *OCUPADO(S)*.")
                 if pendientes:
-                    mensajes_conflicto.append(f"🟡 El/los número(s) {', '.join(pendientes)} ya fue(ron) solicitado(s) por alguien más y está(n) *EN PROCESO DE VERIFICACIÓN DE PAGO*.")
+                    mensajes_conflicto.append(f"🟡 El/los número(s) {', '.join(pendientes)} está(n) *EN PROCESO DE VERIFICACIÓN DE PAGO* por otro participante.")
                 if invalidos:
                     mensajes_conflicto.append(f"⚠️ El/los número(s) {', '.join(invalidos)} está(n) fuera del rango (1 al 100).")
 
                 if mensajes_conflicto and not validos_para_reservar:
-                    # Responder directamente avisando por qué no se pudo
                     respuesta = f"Hola {nombre_usuario}:\n" + "\n".join(mensajes_conflicto)
                     enviar_mensaje_whapi(chat_id_actual, respuesta)
                     return "OK", 200
 
-                # Si tiene números válidos para reservar
                 if validos_para_reservar:
-                    # Crear ID único corto de solicitud (ej: R102)
                     req_id = "R" + str(uuid.uuid4().int)[:4]
 
-                    # Marcar temporalmente como pendiente
                     for n in validos_para_reservar:
                         rifa[n]["estado"] = "pendiente"
                         rifa[n]["solicitud_id"] = req_id
 
-                    # Guardar solicitud en la cola del admin
                     solicitudes[req_id] = {
                         "nombre": nombre_usuario,
                         "telefono": f"+{numero_persona}",
@@ -364,20 +354,22 @@ def webhook():
 
                     # 1. Notificar en el grupo
                     txt_grupo = (
-                        f"⏳ *SOLICITUD EN PROCESO* ⏳\n\n"
-                        f"Hola {nombre_usuario}, hemos recibido tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
-                        f"🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu transferencia. Te avisaremos por aquí tan pronto sea confirmado."
+                        f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
+                        f"Hola {nombre_usuario}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
+                        f"🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu transferencia."
                     )
                     if mensajes_conflicto:
                         txt_grupo += "\n\n📌 *Nota:* " + " ".join(mensajes_conflicto)
 
                     enviar_mensaje_whapi(chat_id_actual, txt_grupo)
 
-                    # 2. Notificar en privado al Administrador
-                    admin_chat_id = f"{NUMERO_ADMIN_SEGURO}@c.us"
-                    # Si el número seguro son 8 dígitos, reconstruimos con 55119
-                    if len(NUMERO_ADMIN_SEGURO) == 8:
-                        admin_chat_id = f"55119{NUMERO_ADMIN_SEGURO}@c.us"
+                    # 2. Notificar en privado al Administrador con Enlaces Azules Directos
+                    admin_num_full = "55119" + NUMERO_ADMIN_SEGURO if len(NUMERO_ADMIN_SEGURO) == 8 else NUMERO_ADMIN_SEGURO
+                    admin_chat_id = f"{admin_num_full}@c.us"
+
+                    # Generar Links de Respuesta Rápida
+                    link_confirmar = f"wa.me/{admin_num_full}?text=confirmar%20{req_id}"
+                    link_rechazar = f"wa.me/{admin_num_full}?text=rechazar%20{req_id}"
 
                     txt_admin = (
                         f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
@@ -385,8 +377,9 @@ def webhook():
                         f"📱 *Teléfono:* wa.me/{numero_persona}\n"
                         f"🎟️ *Números:* *{nums_solicitados_txt}*\n\n"
                         f"-----------------------------------\n"
-                        f"👉 Para APROBAR responde:\n`confirmar {req_id}`\n\n"
-                        f"👉 Para RECHAZAR responde:\n`rechazar {req_id}`"
+                        f"Toca una opción para responder:\n\n"
+                        f"🟢 *[ CONFIRMAR PAGO ]*\n{link_confirmar}\n\n"
+                        f"🔴 *[ RECHAZAR PAGO ]*\n{link_rechazar}"
                     )
                     enviar_mensaje_whapi(admin_chat_id, txt_admin)
                     return "OK", 200
