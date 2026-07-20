@@ -263,14 +263,12 @@ def webhook():
                 todos_ocupados = all(rifa[str(n)]["estado"] == "ocupado" for n in range(1, 101))
                 
                 if todos_ocupados:
-                    # 🔒 CANDADO ABSOLUTO AUTOMÁTICO: Cambiamos a finalizada de inmediato para congelar la edición
                     data_rifa["estado_rifa"] = "finalizada"
                     guardar_data_completa(data_rifa)
 
-                    # Obtenemos la lista final de los 100 números con sus respectivos nombres y teléfonos
                     lista_completa_final = generar_texto_lista()
                     
-                    # 🕒 Cálculo de hora en vivo de Brasil (UTC-3)
+                    # 🕒 Ajuste preciso para la hora de Brasilia (UTC-3) sin importar el servidor de Render
                     hora_actual_brasil = datetime.utcnow() - timedelta(hours=3)
                     hora_int = hora_actual_brasil.hour
 
@@ -288,11 +286,9 @@ def webhook():
                         f"{texto_tiro}"
                     )
                     
-                    # Enviamos el informe masivo y definitivo al grupo con la transparencia de cada número
                     enviar_mensaje_whapi(grupo_destino_cierre, respuesta_cierre)
                     return "OK", 200
                 
-                # Si no se ha llenado la rifa por completo, sigue el flujo ordinario
                 mensajes_resultado = []
                 if exitos: mensajes_resultado.append(f"✅ Reservaste con éxito: {', '.join(exitos)}.")
                 if ocupados: mensajes_resultado.append(f"❌ Ya ocupados: {', '.join(ocupados)}.")
