@@ -8,40 +8,26 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 # -------------------------------------------------------------
-# ⚙️ CONFIGURACIÓN DE TU API DE WHATSAPP (Ajusta según tu servicio)
+# ⚙️ CONFIGURACIÓN GENERAL
 # -------------------------------------------------------------
-# 🤖 BOT ASISTENTE ENCARGADO EN CUBA
-BOT_ASISTENTE_PHONE = "5353215119"
+BOT_ASISTENTE_PHONE = "5353215119" # Bot Encargado
+WHATSAPP_ADMIN_PHONE = "5511948824359" # Tu número de Administrador
+NUMERO_ADMIN_SEGURO = "48824359" # Tus últimos 8 dígitos para filtro de seguridad
 
-# 👑 ADMINISTRADOR GENERAL (Tú en Brasil: +5511948824359)
-WHATSAPP_ADMIN_PHONE = "5511948824359" 
-NUMERO_ADMIN_SEGURO = "48824359" # Tus últimos 8 dígitos para validar permiso
-
-# 🔑 ID DE RESPALDO DE TU GRUPO
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
-
-# 🔑 CLAVE SECRETA DE RESET
 CLAVE_RESET = "admin.resetear.rifa.99"
-
 DB_FILE = "rifa_db.json"
 
 # -------------------------------------------------------------
-# 📤 FUNCIÓN DE ENVÍO DE MENSAJES (Adaptar a tu API)
+# 📤 FUNCIÓN DE ENVÍO (Sustituye con la llamada HTTP a tu API actual)
 # -------------------------------------------------------------
 def enviar_mensaje_whatsapp(destino, texto):
-    """
-    Sustituye esta lógica por la de tu proveedor (Evolution API, UltraMsg, Baileys, etc.)
-    Asegúrate de que 'destino' tenga el formato que tu API requiere.
-    """
     print(f"📤 [ENVIANDO A {destino}]:\n{texto}\n{'-'*30}")
-    
-    # EJEMPLO GENÉRICO DE TU PETICIÓN HTTP:
-    # payload = {"to": destino, "message": texto}
-    # requests.post("URL_DE_TU_API_LOCAL_O_PANEL", json=payload)
+    # Coloca aquí la petición POST de tu proveedor actual
     return True
 
 # -------------------------------------------------------------
-# 💾 GESTIÓN DE BASE DE DATOS LOCAL
+# 💾 GESTIÓN BASE DE DATOS
 # -------------------------------------------------------------
 def inicializar_rifa():
     try:
@@ -125,8 +111,7 @@ def webhook():
     try:
         data_webhook = request.get_json() or {}
 
-        # ⚠️ Extraer mensaje y remitente según el formato de tu API actual
-        # Adaptar estas líneas según las claves JSON que te envíe tu Webhook
+        # ⚠️ Extraer texto y remitente según el cuerpo del JSON de tu API
         mensaje_texto = data_webhook.get("body", "") or data_webhook.get("message", "") or ""
         chat_id_actual = data_webhook.get("chat_id", "") or data_webhook.get("from", "")
         
@@ -135,11 +120,10 @@ def webhook():
         if not comando:
             return "No text", 200
 
-        # Prevenir bucles de auto-respuesta
-        if "lista oficial de la rifa" in comando or "solicitud recibida" in comando:
+        # Prevenir bucles infinitos de auto-respuesta
+        if "lista oficial de la rifa" in comando or "solicitud recibida" in comando or "pago confirmado" in comando:
             return "Ignored loop", 200
 
-        # Obtener sólo los números del teléfono del remitente
         numero_persona = re.sub(r'\D', '', chat_id_actual.split("@")[0])
         nombre_usuario = data_webhook.get("from_name", f"+{numero_persona}")
 
@@ -147,10 +131,10 @@ def webhook():
         rifa = data_rifa["numeros"]
         solicitudes = data_rifa.get("solicitudes_pendientes", {})
         
-        # 🔒 FILTRO MÁSTER: Validar que la orden la des tú (+5511948824359)
+        # Filtro de Seguridad Máster (Sólo tu número aprueba/rechaza)
         es_admin_general = (NUMERO_ADMIN_SEGURO in numero_persona) or (WHATSAPP_ADMIN_PHONE in numero_persona)
 
-        # 🔄 RESET
+        # 1. 🔄 RESET DE BASE DE DATOS
         if comando == CLAVE_RESET:
             if not es_admin_general:
                 return "OK", 200
@@ -159,7 +143,19 @@ def webhook():
             enviar_mensaje_whatsapp(chat_id_actual, respuesta)
             return "OK", 200
 
-        # ✅ CONFIRMAR O ❌ RECHAZAR (BÚSQUEDA INSENSIBLE A MAYÚSCULAS/MINÚSCULAS)
+        # 2. 📋 COMANDOS DE CONSULTA (LISTA, SALUDOS, INICIO)
+        elif comando in ["lista", "hola", "buenas", "inicio", "rifa", "ver lista", "ver"]:
+            respuesta = (
+                f"¡Hola {nombre_usuario}! Aquí tienes el estado actualizado de la Rifa. ✨\n\n"
+                f"💵 *Compra tus números por 10 reales y gana 400 reales.*\n"
+                f"🏆 Premio entregado por PIX en Brasil o en CUP en Cuba.\n\n"
+                f"{generar_texto_lista()}\n\n"
+                f"👉 *¿Cómo comprar?* Responde en este chat escribiendo los números que deseas (ejemplo: *7, 14, 25*)."
+            )
+            enviar_mensaje_whatsapp(chat_id_actual, respuesta)
+            return "OK", 200
+
+        # 3. ✅ CONFIRMAR O ❌ RECHAZAR SOLICITUD
         elif comando.startswith("confirmar ") or comando.startswith("rechazar "):
             if not es_admin_general:
                 print(f"⛔ DENEGADO: El número {numero_persona} no es el Administrador General.")
@@ -169,7 +165,7 @@ def webhook():
             accion = partes_cmd[0].lower()
             req_id_input = partes_cmd[1].strip() if len(partes_cmd) > 1 else ""
 
-            # Búsqueda flexible de la clave
+            # Búsqueda flexible (evita error mayúsculas/minúsculas)
             req_id_encontrado = None
             for key in solicitudes.keys():
                 if key.lower() == req_id_input.lower():
@@ -192,7 +188,6 @@ def webhook():
                         rifa[n]["telefono"] = user_phone
                         rifa[n]["enlace"] = f"wa.me/{user_phone.replace('+', '').strip()}"
 
-                    # Eliminar la solicitud de la lista de pendientes
                     del solicitudes[req_id_encontrado]
                     data_rifa["numeros"] = rifa
                     data_rifa["solicitudes_pendientes"] = solicitudes
@@ -202,10 +197,10 @@ def webhook():
 
                     guardar_data_completa(data_rifa)
 
-                    # 1. Confirmar a ti (Administrador)
+                    # Respuesta al Admin
                     enviar_mensaje_whatsapp(chat_id_actual, f"✅ *Solicitud {req_id_encontrado} APROBADA.* Números ({nums_formatted}) asignados a {user_nombre}.")
 
-                    # 2. Notificar al grupo y marcar como OCUPADOS
+                    # Notificación al Grupo y actualización
                     msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Usuario:* {user_nombre}\n🎟️ *Números asignados:* {nums_formatted}\n\n¡Gracias por tu compra! 🤝\n\n" + generar_texto_lista()
                     enviar_mensaje_whatsapp(grupo_origen, msg_grupo)
 
@@ -228,7 +223,7 @@ def webhook():
             
             return "OK", 200
 
-        # ✨ SOLICITUD DE RESERVA POR PARTE DE USUARIOS
+        # 4. 🛒 COMPRA DE NÚMEROS
         else:
             partes = [p.strip() for p in mensaje_texto.split(",")]
             es_lista_numeros = all(p.isdigit() for p in partes) if partes and mensaje_texto else False
@@ -243,7 +238,6 @@ def webhook():
                             validos_para_reservar.append(num_str)
 
                 if validos_para_reservar:
-                    # ID generado siempre en minúsculas
                     req_id = "r" + str(uuid.uuid4().int)[:4]
 
                     for n in validos_para_reservar:
@@ -263,10 +257,10 @@ def webhook():
 
                     nums_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
 
-                    # 1. Mensaje en el grupo
+                    # Confirmación en el grupo
                     enviar_mensaje_whatsapp(chat_id_actual, f"⏳ *SOLICITUD RECIBIDA*\n\nHola {nombre_usuario}, tus números *{nums_txt}* quedan en 🟡 *Verificación de Pago*.")
 
-                    # 2. Enlace enviado a tu chat privado (+5511948824359) apuntando al número del bot (+5353215119)
+                    # Notificación al Administrador con links
                     link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
                     link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
 
