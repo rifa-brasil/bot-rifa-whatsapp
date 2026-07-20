@@ -15,12 +15,9 @@ WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 # 🔑 ID DE RESPALDO DE TU GRUPO
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
-# 🔐 IDENTIFICADOR EXACTO DEL ADMINISTRADOR PARA ENVIAR PRIVADOS
-# Cambia solo si tu número de WhatsApp no empieza con 55 (Brasil)
+# 🔐 ADMINISTRADOR GENERAL (ÚNICO AUTORIZADO)
 WHATSAPP_ADMIN_PHONE = "5511948824359" 
 WHATSAPP_ADMIN_CHAT_ID = f"{WHATSAPP_ADMIN_PHONE}@c.us"
-
-# 🔐 FILTRO DE SEGURIDAD MÁSTER: Tus últimos 8 dígitos
 NUMERO_ADMIN_SEGURO = "48824359"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
@@ -164,6 +161,7 @@ def webhook():
         estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
         
         respuesta = ""
+        # 🔒 VALIDACIÓN EXCLUSIVA PARA EL ADMINISTRADOR GENERAL (+5511948824359)
         es_admin_real = NUMERO_ADMIN_SEGURO in numero_persona or msg.get("from_me") is True or msg.get("outbound") is True
 
         # 🔄 COMANDO RESET
@@ -173,9 +171,10 @@ def webhook():
             borrar_y_recrear_base_datos()
             respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles y el sistema está abierto.\n\n" + generar_texto_lista()
 
-        # ✅/❌ APROBACIÓN MANUAL DEL ADMINISTRADOR
+        # ✅/❌ APROBACIÓN MANUAL EXCLUSIVA DEL ADMINISTRADOR GENERAL
         elif comando.startswith("confirmar ") or comando.startswith("rechazar "):
             if not es_admin_real:
+                print(f"⛔ Intento de autorización denegado para el número: {numero_persona}")
                 return "OK", 200
             
             partes_cmd = comando.split()
@@ -366,7 +365,7 @@ def webhook():
 
                     enviar_mensaje_whapi(chat_id_actual, txt_grupo)
 
-                    # 2. Notificar en privado al Administrador con Enlaces Azules Directos
+                    # 2. Notificar exclusivamente al Administrador General
                     link_confirmar = f"wa.me/{WHATSAPP_ADMIN_PHONE}?text=confirmar%20{req_id}"
                     link_rechazar = f"wa.me/{WHATSAPP_ADMIN_PHONE}?text=rechazar%20{req_id}"
 
@@ -381,7 +380,7 @@ def webhook():
                         f"🔴 *[ RECHAZAR PAGO ]*\n{link_rechazar}"
                     )
                     
-                    # Se envía de forma directa a tu CHAT_ID privado
+                    # Envío directo a tu chat de administrador (+5511948824359)
                     enviar_mensaje_whapi(WHATSAPP_ADMIN_CHAT_ID, txt_admin)
                     return "OK", 200
 
