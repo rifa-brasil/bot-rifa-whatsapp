@@ -14,7 +14,7 @@ WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 # 🔑 ID DE RESPALDO DE TU GRUPO
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
-# 🔐 FILTRO DE SEGURIDAD MÁSTER: Tu base de teléfono en São Paulo
+# 🔐 FILTRO DE SEGURIDAD MÁSTER: Tu número completo de Brasil (São Paulo)
 NUMERO_ADMIN_SEGURO = "5511948824359"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
@@ -165,6 +165,7 @@ def webhook():
         # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE
         elif comando.startswith("resultado de florida con"):
             if not es_admin_real:
+                print(f"⛔ Intento de comando ganador rechazado. Remitente: {numero_persona}")
                 return "OK", 200
 
             try:
@@ -268,7 +269,7 @@ def webhook():
 
                     lista_completa_final = generar_texto_lista()
                     
-                    # 🕒 Ajuste preciso para la hora de Brasilia (UTC-3) sin importar el servidor de Render
+                    # 🕒 Cálculo de hora en vivo de Brasil (UTC-3)
                     hora_actual_brasil = datetime.utcnow() - timedelta(hours=3)
                     hora_int = hora_actual_brasil.hour
 
@@ -285,7 +286,6 @@ def webhook():
                         f"{lista_completa_final}\n\n"
                         f"{texto_tiro}"
                     )
-                    
                     enviar_mensaje_whapi(grupo_destino_cierre, respuesta_cierre)
                     return "OK", 200
                 
