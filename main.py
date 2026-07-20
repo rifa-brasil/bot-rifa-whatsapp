@@ -198,8 +198,7 @@ def webhook():
                                 f"¡Hola {nombre_ganador}! 👋\n\n"
                                 f"🎉 *¡MUCHAS FELICIDADES!* 🎉\n\n"
                                 f"Tu número *{num_ganador.zfill(2)}* salió premiado en el resultado de la Florida y has ganado los *400 reales* de la rifa. 🏆💵\n\n"
-                                f"👉 Por favor, ponte en contacto con el administrador lo antes posible para coordinar tu pago."
-                                f"👉 Administrador = "5511948824359"
+                                f"👉 Por favor, dígame cómo desea su pago."
                             )
                             enviar_mensaje_whapi(chat_privado_ganador, texto_privado)
                         else:
