@@ -15,7 +15,12 @@ WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 # 🔑 ID DE RESPALDO DE TU GRUPO
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
-# 🔐 FILTRO DE SEGURIDAD MÁSTER: Tus últimos 8 dígitos (São Paulo)
+# 🔐 IDENTIFICADOR EXACTO DEL ADMINISTRADOR PARA ENVIAR PRIVADOS
+# Cambia solo si tu número de WhatsApp no empieza con 55 (Brasil)
+WHATSAPP_ADMIN_PHONE = "5511948824359" 
+WHATSAPP_ADMIN_CHAT_ID = f"{WHATSAPP_ADMIN_PHONE}@c.us"
+
+# 🔐 FILTRO DE SEGURIDAD MÁSTER: Tus últimos 8 dígitos
 NUMERO_ADMIN_SEGURO = "48824359"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
@@ -113,9 +118,9 @@ def enviar_mensaje_whapi(chat_id, texto, menciones=[]):
     }
     try:
         r = requests.post(WHAPI_API_URL, json=payload, headers=headers)
-        print(f"📤 Envío a {chat_id}: Estado {r.status_code}")
+        print(f"📤 Envío a {chat_id}: Estado {r.status_code} -> Respuesta: {r.text}")
     except Exception as e:
-        print(f"Error al enviar a Whapi: {e}")
+        print(f"🔴 Error al enviar a Whapi: {e}")
 
 @app.route("/", methods=["GET"])
 def home():
@@ -138,7 +143,7 @@ def webhook():
         mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
         comando = mensaje_texto.lower()
 
-        # 🛑 EVITAR BUCLE
+        # 🛑 EVITAR BUCLE DE AUTO-RESPUESTA
         if "lista oficial de la rifa" in comando or "participantes convocados" in comando or "tenemos un ganador" in comando:
             return "Ignored loop", 200
 
@@ -168,7 +173,7 @@ def webhook():
             borrar_y_recrear_base_datos()
             respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles y el sistema está abierto.\n\n" + generar_texto_lista()
 
-        # ✅/❌ APROBACIÓN MANUAL DEL ADMINISTRADOR CON ENLACES
+        # ✅/❌ APROBACIÓN MANUAL DEL ADMINISTRADOR
         elif comando.startswith("confirmar ") or comando.startswith("rechazar "):
             if not es_admin_real:
                 return "OK", 200
@@ -187,7 +192,6 @@ def webhook():
                 nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
 
                 if accion == "confirmar":
-                    # Asignar definitivamente
                     for n in user_nums:
                         rifa[n]["estado"] = "ocupado"
                         rifa[n]["nombre"] = user_nombre
@@ -211,7 +215,6 @@ def webhook():
                     enviar_mensaje_whapi(grupo_origen, msg_grupo)
 
                 elif accion == "rechazar":
-                    # Liberar números
                     for n in user_nums:
                         rifa[n] = {"estado": "disponible", "nombre": "", "telefono": "", "enlace": "", "solicitud_id": ""}
 
@@ -290,7 +293,7 @@ def webhook():
             if estado_actual_rifa == "activa":
                 respuesta += "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (ej: *7, 14*)."
 
-        # 🛒 PROCESO DE RESERVAS DE NÚMEROS (CON ENLACES DE ACCIÓN RÁPIDA AL ADMIN)
+        # 🛒 PROCESO DE RESERVAS DE NÚMEROS
         else:
             partes = [p.strip() for p in mensaje_texto.split(",")]
             es_lista_numeros = all(p.isdigit() for p in partes) if partes and mensaje_texto else False
@@ -364,12 +367,8 @@ def webhook():
                     enviar_mensaje_whapi(chat_id_actual, txt_grupo)
 
                     # 2. Notificar en privado al Administrador con Enlaces Azules Directos
-                    admin_num_full = "55119" + NUMERO_ADMIN_SEGURO if len(NUMERO_ADMIN_SEGURO) == 8 else NUMERO_ADMIN_SEGURO
-                    admin_chat_id = f"{admin_num_full}@c.us"
-
-                    # Generar Links de Respuesta Rápida
-                    link_confirmar = f"wa.me/{admin_num_full}?text=confirmar%20{req_id}"
-                    link_rechazar = f"wa.me/{admin_num_full}?text=rechazar%20{req_id}"
+                    link_confirmar = f"wa.me/{WHATSAPP_ADMIN_PHONE}?text=confirmar%20{req_id}"
+                    link_rechazar = f"wa.me/{WHATSAPP_ADMIN_PHONE}?text=rechazar%20{req_id}"
 
                     txt_admin = (
                         f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
@@ -381,7 +380,9 @@ def webhook():
                         f"🟢 *[ CONFIRMAR PAGO ]*\n{link_confirmar}\n\n"
                         f"🔴 *[ RECHAZAR PAGO ]*\n{link_rechazar}"
                     )
-                    enviar_mensaje_whapi(admin_chat_id, txt_admin)
+                    
+                    # Se envía de forma directa a tu CHAT_ID privado
+                    enviar_mensaje_whapi(WHATSAPP_ADMIN_CHAT_ID, txt_admin)
                     return "OK", 200
 
         if respuesta:
