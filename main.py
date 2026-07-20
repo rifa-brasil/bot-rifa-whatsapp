@@ -2,6 +2,7 @@ import os
 import json
 import requests
 import re
+import uuid
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 
@@ -14,11 +15,11 @@ WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 # 🔑 ID DE RESPALDO DE TU GRUPO
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
-# 🔐 FILTRO DE SEGURIDAD MÁSTER: Tus últimos 8 dígitos (así reconoce con 55119..., 5511... o sin código)
+# 🔐 FILTRO DE SEGURIDAD MÁSTER: Tus últimos 8 dígitos (São Paulo)
 NUMERO_ADMIN_SEGURO = "48824359"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
-CLAVE_RESET = "resetlist"
+CLAVE_RESET = "admin.resetear.rifa.99"
 
 DB_FILE = "rifa_db.json"
 
@@ -27,7 +28,8 @@ def inicializar_rifa():
         if not os.path.exists(DB_FILE):
             data_inicial = {
                 "estado_rifa": "activa",
-                "numeros": {str(i): {"estado": "disponible", "nombre": "", "telefono": "", "enlace": ""} for i in range(1, 101)}
+                "numeros": {str(i): {"estado": "disponible", "nombre": "", "telefono": "", "enlace": "", "solicitud_id": ""} for i in range(1, 101)},
+                "solicitudes_pendientes": {}
             }
             with open(DB_FILE, "w") as f:
                 json.dump(data_inicial, f, indent=4)
@@ -48,7 +50,9 @@ def obtener_data_completa():
         with open(DB_FILE, "r") as f:
             data = json.load(f)
             if "estado_rifa" not in data:
-                data = {"estado_rifa": "activa", "numeros": data}
+                data["estado_rifa"] = "activa"
+            if "solicitudes_pendientes" not in data:
+                data["solicitudes_pendientes"] = {}
             return data
     except Exception as e:
         print(f"🔴 Error al leer JSON (recreando base): {e}")
@@ -71,9 +75,13 @@ def generar_texto_lista():
     for i in range(1, 101):
         num_str = str(i).zfill(2)
         info = rifa[str(i)]
-        if info["estado"] == "disponible":
+        estado = info.get("estado", "disponible")
+
+        if estado == "disponible":
             texto += f"🟢 *{num_str}*: Disponible\n"
             disponibles += 1
+        elif estado == "pendiente":
+            texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
             if info.get("enlace"):
                 link = info["enlace"]
@@ -130,7 +138,7 @@ def webhook():
         mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
         comando = mensaje_texto.lower()
 
-        # 🛑 EVITAR BUCLE: Ignorar mensajes que el propio bot envió automáticamente
+        # 🛑 EVITAR BUCLE
         if "lista oficial de la rifa" in comando or "participantes convocados" in comando or "tenemos un ganador" in comando:
             return "Ignored loop", 200
 
@@ -148,10 +156,10 @@ def webhook():
 
         data_rifa = obtener_data_completa()
         rifa = data_rifa["numeros"]
+        solicitudes = data_rifa.get("solicitudes_pendientes", {})
         estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
         
         respuesta = ""
-        # Reconoce el admin si contiene la secuencia de tu número de São Paulo
         es_admin_real = NUMERO_ADMIN_SEGURO in numero_persona or msg.get("from_me") is True or msg.get("outbound") is True
 
         # 🔄 COMANDO RESET
@@ -161,10 +169,74 @@ def webhook():
             borrar_y_recrear_base_datos()
             respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles y el sistema está abierto.\n\n" + generar_texto_lista()
 
+        # ✅/❌ APROBACIÓN MANUAL DEL ADMINISTRADOR
+        elif comando.startswith("confirmar ") or comando.startswith("rechazar "):
+            if not es_admin_real:
+                return "OK", 200
+            
+            partes_cmd = comando.split()
+            accion = partes_cmd[0]
+            req_id = partes_cmd[1] if len(partes_cmd) > 1 else ""
+
+            if req_id in solicitudes:
+                sol = solicitudes[req_id]
+                user_nombre = sol["nombre"]
+                user_phone = sol["telefono"]
+                user_nums = sol["numeros"]
+                grupo_origen = sol["grupo_id"]
+
+                nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
+
+                if accion == "confirmar":
+                    # Pasar de pendiente a ocupado definitivamente
+                    for n in user_nums:
+                        rifa[n]["estado"] = "ocupado"
+                        rifa[n]["nombre"] = user_nombre
+                        rifa[n]["telefono"] = user_phone
+                        rifa[n]["enlace"] = f"wa.me/{user_phone.replace('+', '').strip()}"
+
+                    del solicitudes[req_id]
+                    data_rifa["numeros"] = rifa
+                    data_rifa["solicitudes_pendientes"] = solicitudes
+
+                    # Verificar si la lista se completó (100 ocupados)
+                    todos_ocupados = all(rifa[str(n)]["estado"] == "ocupado" for n in range(1, 101))
+                    if todos_ocupados:
+                        data_rifa["estado_rifa"] = "finalizada"
+
+                    guardar_data_completa(data_rifa)
+
+                    # Confirmar al administrador
+                    enviar_mensaje_whapi(chat_id_actual, f"✅ *Solicitud {req_id} APROBADA.* Los números ({nums_formatted}) fueron asignados a {user_nombre}.")
+
+                    # Notificar al Grupo
+                    msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Usuario:* {user_nombre}\n🎟️ *Números asignados:* {nums_formatted}\n\n¡Gracias por tu compra! 🤝\n\n" + generar_texto_lista()
+                    enviar_mensaje_whapi(grupo_origen, msg_grupo)
+
+                elif accion == "rechazar":
+                    # Liberar los números nuevamente
+                    for n in user_nums:
+                        rifa[n] = {"estado": "disponible", "nombre": "", "telefono": "", "enlace": "", "solicitud_id": ""}
+
+                    del solicitudes[req_id]
+                    data_rifa["numeros"] = rifa
+                    data_rifa["solicitudes_pendientes"] = solicitudes
+                    guardar_data_completa(data_rifa)
+
+                    # Confirmar al administrador
+                    enviar_mensaje_whapi(chat_id_actual, f"❌ *Solicitud {req_id} RECHAZADA.* Los números ({nums_formatted}) vuelven a estar disponibles.")
+
+                    # Notificar al Grupo
+                    msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola {user_nombre}, tu solicitud para el/los número(s) *{nums_formatted}* no ha sido aprobada. Los números vuelven a estar 🟢 *Disponibles* para los demás participantes."
+                    enviar_mensaje_whapi(grupo_origen, msg_grupo)
+
+            else:
+                enviar_mensaje_whapi(chat_id_actual, f"⚠️ No se encontró la solicitud ID: `{req_id}` o ya fue procesada.")
+            return "OK", 200
+
         # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE
         elif comando.startswith("resultado de florida con"):
             if not es_admin_real:
-                print(f"⛔ Intento de comando ganador rechazado por no ser admin.")
                 return "OK", 200
 
             try:
@@ -189,8 +261,7 @@ def webhook():
                                 f"🎉🎉 *¡TENEMOS UN GANADOR EN LA RIFA!* 🎉🎉\n\n"
                                 f"El número premiado en el tiro de la Florida fue el *{num_ganador.zfill(2)}*.\n\n"
                                 f"🥇 *¡Felicidades {nombre_ganador}!* (+{telefono_ganador}) Eres el ganador de los *400 reales* 💵✨.\n\n"
-                                f"🔒 *La lista ha sido cerrada de forma definitiva.* Ya no se pueden ocupar más números libres hasta el próximo sorteo.\n\n"
-                                f"📩 Le hemos enviado un mensaje privado automáticamente para coordinar su premio."
+                                f"🔒 *La lista ha sido cerrada de forma definitiva.*"
                             )
                             enviar_mensaje_whapi(grupo_destino, texto_grupo)
                             
@@ -198,7 +269,7 @@ def webhook():
                                 f"¡Hola {nombre_ganador}! 👋\n\n"
                                 f"🎉 *¡MUCHAS FELICIDADES!* 🎉\n\n"
                                 f"Tu número *{num_ganador.zfill(2)}* salió premiado en el resultado de la Florida y has ganado los *400 reales* de la rifa. 🏆💵\n\n"
-                                f"👉 Por favor, dígame cómo desea su pago."
+                                f"👉 Por favor, ponte en contacto con el administrador lo antes posible para coordinar tu pago."
                             )
                             enviar_mensaje_whapi(chat_privado_ganador, texto_privado)
                         else:
@@ -213,87 +284,112 @@ def webhook():
                 print(f"🔴 Error interno procesando ganador: {e_ganador}")
 
         # ✨ SALUDO / LISTA
-        elif comando in ["lista"]:
+        elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
             respuesta = (
                 f"¡Hola {nombre_usuario}! Aquí tienes el estado actual de la Rifa. ✨\n\n"
-                f"💵 *Compra uno o varios números por un valor de 10 reales y gana 400. El número ganador se obtendrá del resultado de la Florida Pick3 en la Noche. (Cuando la lista del 1 al 100 esté ocupada completa)*\n"
-                f"🏆 El premio se entregará mediante transferencia PIX o en CUP al familiar en Cuba.\n\n"
+                f"💵 *Compra uno o varios números por un valor de 10 reales y gana 400 reales.*\n"
+                f"🏆 El premio se entregará aquí en Brasil mediante transferencia PIX o al familiar en Cuba en CUP.\n\n"
                 f"{generar_texto_lista()}"
             )
             if estado_actual_rifa == "activa":
                 respuesta += "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (ej: *7, 14*)."
 
-        # 🛒 PROCESO DE RESERVAS DE NÚMEROS
+        # 🛒 PROCESO DE RESERVAS DE NÚMEROS (CON VERIFICACIÓN Y PENDIENTES)
         else:
             partes = [p.strip() for p in mensaje_texto.split(",")]
             es_lista_numeros = all(p.isdigit() for p in partes) if partes and mensaje_texto else False
 
             if es_lista_numeros:
-                # 🛡️ REBOTE SI ESTÁ FINALIZADA / CONGELADA
                 if estado_actual_rifa == "finalizada":
-                    respuesta = "🔒 *Lo sentimos, el sistema está cerrado.* Todos los números están congelados o el sorteo ya concluyó. Esperando reinicio del administrador."
+                    respuesta = "🔒 *Lo sentimos, el sistema está cerrado.* El sorteo ya concluyó o está congelado."
                     enviar_mensaje_whapi(chat_id_actual, respuesta)
                     return "OK", 200
 
-                exitos, ocupados, invalidos = [], [], []
+                ocupados, pendientes, validos_para_reservar, invalidos = [], [], [], []
 
                 for p in partes:
                     num_elegido = int(p)
                     if 1 <= num_elegido <= 100:
                         num_str = str(num_elegido)
                         info = rifa[num_str]
-                        if info["estado"] == "disponible":
-                            rifa[num_str] = {
-                                "estado": "ocupado",
-                                "nombre": nombre_usuario,
-                                "telefono": f"+{numero_persona}",
-                                "enlace": link_directo
-                            }
-                            exitos.append(num_str.zfill(2))
-                        else:
+                        est = info.get("estado", "disponible")
+
+                        if est == "ocupado":
                             ocupados.append(f"*{num_str.zfill(2)}*")
+                        elif est == "pendiente":
+                            pendientes.append(f"*{num_str.zfill(2)}*")
+                        else:
+                            validos_para_reservar.append(num_str)
                     else:
                         invalidos.append(p)
 
-                if exitos:
-                    data_rifa["numeros"] = rifa
-                    guardar_data_completa(data_rifa)
+                # Si intentó pedir números que ya están ocupados o en proceso
+                mensajes_conflicto = []
+                if ocupados:
+                    mensajes_conflicto.append(f"🔴 El/los número(s) {', '.join(ocupados)} ya está(n) *OCUPADO(S)* por otro participante.")
+                if pendientes:
+                    mensajes_conflicto.append(f"🟡 El/los número(s) {', '.join(pendientes)} ya fue(ron) solicitado(s) por alguien más y está(n) *EN PROCESO DE VERIFICACIÓN DE PAGO*.")
+                if invalidos:
+                    mensajes_conflicto.append(f"⚠️ El/los número(s) {', '.join(invalidos)} está(n) fuera del rango (1 al 100).")
 
-                # Verificar inmediatamente después de guardar si se alcanzó el total
-                todos_ocupados = all(rifa[str(n)]["estado"] == "ocupado" for n in range(1, 101))
-                
-                if todos_ocupados:
-                    data_rifa["estado_rifa"] = "finalizada"
-                    guardar_data_completa(data_rifa)
-
-                    lista_completa_final = generar_texto_lista()
-                    
-                    # 🕒 Cálculo de hora en vivo de Brasil (UTC-3)
-                    hora_actual_brasil = datetime.utcnow() - timedelta(hours=3)
-                    hora_int = hora_actual_brasil.hour
-
-                    if hora_int < 22:
-                        texto_tiro = "🚨 *¡El resultado será esta misma noche en el tiro de la Florida!* Mucha suerte a todos. 🍀"
-                    else:
-                        texto_tiro = "🚨 *¡Los números se completaron pasadas las 22:00h! El resultado será mañana por la noche en el tiro de la Florida.* Mucha suerte a todos. 🍀"
-
-                    grupo_destino_cierre = chat_id_actual if "@g.us" in chat_id_actual else GRUPO_CHAT_ID_RESPALDO
-                    
-                    respuesta_cierre = (
-                        "🔥 *¡ATENCIÓN A TODOS LOS PARTICIPANTES!* 🔥\n\n"
-                        "¡Todos los 100 números de la rifa han sido completamente ocupados! El sistema se ha cerrado y congelado automáticamente para nuevas compras o ediciones.\n\n"
-                        f"{lista_completa_final}\n\n"
-                        f"{texto_tiro}"
-                    )
-                    enviar_mensaje_whapi(grupo_destino_cierre, respuesta_cierre)
+                if mensajes_conflicto and not validos_para_reservar:
+                    # Responder directamente avisando por qué no se pudo
+                    respuesta = f"Hola {nombre_usuario}:\n" + "\n".join(mensajes_conflicto)
+                    enviar_mensaje_whapi(chat_id_actual, respuesta)
                     return "OK", 200
-                
-                mensajes_resultado = []
-                if exitos: mensajes_resultado.append(f"✅ Reservaste con éxito: {', '.join(exitos)}.")
-                if ocupados: mensajes_resultado.append(f"❌ Ya ocupados: {', '.join(ocupados)}.")
-                if invalidos: mensajes_resultado.append(f"⚠️ Fuera de rango: {', '.join(invalidos)}.")
 
-                respuesta = "\n".join(mensajes_resultado) + "\n\n" + generar_texto_lista()
+                # Si tiene números válidos para reservar
+                if validos_para_reservar:
+                    # Crear ID único corto de solicitud (ej: R102)
+                    req_id = "R" + str(uuid.uuid4().int)[:4]
+
+                    # Marcar temporalmente como pendiente
+                    for n in validos_para_reservar:
+                        rifa[n]["estado"] = "pendiente"
+                        rifa[n]["solicitud_id"] = req_id
+
+                    # Guardar solicitud en la cola del admin
+                    solicitudes[req_id] = {
+                        "nombre": nombre_usuario,
+                        "telefono": f"+{numero_persona}",
+                        "numeros": validos_para_reservar,
+                        "grupo_id": chat_id_actual if "@g.us" in chat_id_actual else GRUPO_CHAT_ID_RESPALDO
+                    }
+
+                    data_rifa["numeros"] = rifa
+                    data_rifa["solicitudes_pendientes"] = solicitudes
+                    guardar_data_completa(data_rifa)
+
+                    nums_solicitados_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
+
+                    # 1. Notificar en el grupo
+                    txt_grupo = (
+                        f"⏳ *SOLICITUD EN PROCESO* ⏳\n\n"
+                        f"Hola {nombre_usuario}, hemos recibido tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
+                        f"🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu transferencia. Te avisaremos por aquí tan pronto sea confirmado."
+                    )
+                    if mensajes_conflicto:
+                        txt_grupo += "\n\n📌 *Nota:* " + " ".join(mensajes_conflicto)
+
+                    enviar_mensaje_whapi(chat_id_actual, txt_grupo)
+
+                    # 2. Notificar en privado al Administrador
+                    admin_chat_id = f"{NUMERO_ADMIN_SEGURO}@c.us"
+                    # Si el número seguro son 8 dígitos, reconstruimos con 55119
+                    if len(NUMERO_ADMIN_SEGURO) == 8:
+                        admin_chat_id = f"55119{NUMERO_ADMIN_SEGURO}@c.us"
+
+                    txt_admin = (
+                        f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
+                        f"👤 *Cliente:* {nombre_usuario}\n"
+                        f"📱 *Teléfono:* wa.me/{numero_persona}\n"
+                        f"🎟️ *Números:* *{nums_solicitados_txt}*\n\n"
+                        f"-----------------------------------\n"
+                        f"👉 Para APROBAR responde:\n`confirmar {req_id}`\n\n"
+                        f"👉 Para RECHAZAR responde:\n`rechazar {req_id}`"
+                    )
+                    enviar_mensaje_whapi(admin_chat_id, txt_admin)
+                    return "OK", 200
 
         if respuesta:
             enviar_mensaje_whapi(chat_id_actual, respuesta)
