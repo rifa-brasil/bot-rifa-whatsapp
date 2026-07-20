@@ -8,17 +8,21 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# 🔑 TU TOKEN DEL CANAL SANDBOX DE WHAPI
+# 🔑 TU TOKEN DEL CANAL DE WHAPI
 WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
 WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 
 # 🔑 ID DE RESPALDO DE TU GRUPO
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
-# 🔐 ADMINISTRADOR GENERAL (ÚNICO AUTORIZADO)
+# 👑 1. ADMINISTRADOR GENERAL (ÚNICO AUTORIZADO A CONFIRMAR/RECHAZAR PAGOS)
 WHATSAPP_ADMIN_PHONE = "5511948824359" 
 WHATSAPP_ADMIN_CHAT_ID = f"{WHATSAPP_ADMIN_PHONE}@c.us"
-NUMERO_ADMIN_SEGURO = "48824359"
+NUMERO_ADMIN_SEGURO = "48824359" # Tus últimos 8 dígitos
+
+# 🤖 2. BOT ASISTENTE ENCARGADO DE NOTIFICACIONES
+BOT_ASISTENTE_PHONE = "5353215119"
+BOT_ASISTENTE_CHAT_ID = f"{BOT_ASISTENTE_PHONE}@c.us"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
 CLAVE_RESET = "admin.resetear.rifa.99"
@@ -161,20 +165,21 @@ def webhook():
         estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
         
         respuesta = ""
-        # 🔒 VALIDACIÓN EXCLUSIVA PARA EL ADMINISTRADOR GENERAL (+5511948824359)
-        es_admin_real = NUMERO_ADMIN_SEGURO in numero_persona or msg.get("from_me") is True or msg.get("outbound") is True
+
+        # 🔒 FILTRO DE SEGURIDAD MÁSTER: Únicamente tú (+5511948824359) puedes autorizar
+        es_admin_general = (NUMERO_ADMIN_SEGURO in numero_persona) or (WHATSAPP_ADMIN_PHONE in numero_persona)
 
         # 🔄 COMANDO RESET
         if comando == CLAVE_RESET:
-            if not es_admin_real:
+            if not es_admin_general:
                 return "OK", 200
             borrar_y_recrear_base_datos()
             respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles y el sistema está abierto.\n\n" + generar_texto_lista()
 
         # ✅/❌ APROBACIÓN MANUAL EXCLUSIVA DEL ADMINISTRADOR GENERAL
         elif comando.startswith("confirmar ") or comando.startswith("rechazar "):
-            if not es_admin_real:
-                print(f"⛔ Intento de autorización denegado para el número: {numero_persona}")
+            if not es_admin_general:
+                print(f"⛔ DENEGADO: El número {numero_persona} no es el Administrador General (+5511948824359).")
                 return "OK", 200
             
             partes_cmd = comando.split()
@@ -234,7 +239,7 @@ def webhook():
 
         # 🏆 DETECTAR GANADOR AUTOMÁTICAMENTE
         elif comando.startswith("resultado de florida con"):
-            if not es_admin_real:
+            if not es_admin_general:
                 return "OK", 200
 
             try:
@@ -365,9 +370,9 @@ def webhook():
 
                     enviar_mensaje_whapi(chat_id_actual, txt_grupo)
 
-                    # 2. Notificar exclusivamente al Administrador General
-                    link_confirmar = f"wa.me/{WHATSAPP_ADMIN_PHONE}?text=confirmar%20{req_id}"
-                    link_rechazar = f"wa.me/{WHATSAPP_ADMIN_PHONE}?text=rechazar%20{req_id}"
+                    # 2. Generar notificación dirigida EXCLUSIVAMENTE a tu chat privado (+5511948824359)
+                    link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
+                    link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
 
                     txt_admin = (
                         f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
@@ -380,7 +385,7 @@ def webhook():
                         f"🔴 *[ RECHAZAR PAGO ]*\n{link_rechazar}"
                     )
                     
-                    # Envío directo a tu chat de administrador (+5511948824359)
+                    # Se envía a tu número de Administrador General (+5511948824359)
                     enviar_mensaje_whapi(WHATSAPP_ADMIN_CHAT_ID, txt_admin)
                     return "OK", 200
 
