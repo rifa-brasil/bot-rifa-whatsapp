@@ -141,19 +141,35 @@ def webhook():
  
         msg = messages[0]
         
-        text_obj = msg.get("text", {})
-        mensaje_texto = text_obj.get("body", "").strip() if text_obj else ""
+        # 🛑 IGNORAR MENSAJES ENVIADOS POR EL PROPIO BOT (Para evitar spam infinito)
+        if msg.get("from_me") == True:
+            return "OK", 200
+
+        # 📝 EXTRAER TEXTO DE FORMA MÁS ROBUSTA (Soporta múltiples formatos de Whapi)
+        mensaje_texto = ""
+        if "text" in msg and isinstance(msg["text"], dict):
+            mensaje_texto = msg["text"].get("body", "")
+        elif "body" in msg and isinstance(msg["body"], str):
+            mensaje_texto = msg["body"]
+        else:
+            mensaje_texto = msg.get("caption", "")
+            
+        mensaje_texto = mensaje_texto.strip()
         comando = mensaje_texto.lower()
+        
+        if not comando:
+            return "OK", 200
  
-        # 🛑 EVITAR BUCLE DE AUTO-RESPUESTA
+        # 🛑 SEGUNDO FILTRO DE BUCLE
         if "lista oficial de la rifa" in comando or "participantes convocados" in comando or "tenemos un ganador" in comando:
             return "Ignored loop", 200
  
         chat_id_actual = msg.get("chat_id", "")
-        raw_from = msg.get("from", "")
         
+        # 👤 IDENTIFICAR AL REMITENTE REAL INCLUSO EN GRUPOS
+        raw_from = msg.get("author") or msg.get("sender_id") or msg.get("from", "")
         if not raw_from:
-            raw_from = msg.get("sender_id", chat_id_actual)
+            raw_from = chat_id_actual
  
         id_antes_del_arroba = raw_from.split("@")[0]
         numero_persona = re.sub(r'\D', '', id_antes_del_arroba)
@@ -167,7 +183,7 @@ def webhook():
         
         respuesta = ""
  
-        # 🔒 FILTRO MÁSTER DE SEGURIDAD (Exclusivo para ti +5511948824359)
+        # 🔒 FILTRO MÁSTER DE SEGURIDAD (Exclusivo para ti)
         es_admin_general = (NUMERO_ADMIN_SEGURO in numero_persona) or (WHATSAPP_ADMIN_PHONE in numero_persona)
  
         # 🔄 COMANDO RESET
@@ -177,7 +193,7 @@ def webhook():
             borrar_y_recrear_base_datos()
             respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles y el sistema está abierto.\n\n" + generar_texto_lista()
  
-        # ✅/❌ APROBACIÓN MANUAL (BÚSQUEDA FLEXIBLE DE ID)
+        # ✅/❌ APROBACIÓN MANUAL
         elif comando.startswith("confirmar ") or comando.startswith("rechazar "):
             if not es_admin_general:
                 print(f"⛔ DENEGADO: El número {numero_persona} no es el Administrador General.")
@@ -187,7 +203,6 @@ def webhook():
             accion = partes_cmd[0].lower()
             req_id_input = partes_cmd[1].strip() if len(partes_cmd) > 1 else ""
  
-            # Buscar la clave coincidente ignorando mayúsculas/minúsculas
             req_id_encontrado = None
             for key in solicitudes.keys():
                 if key.lower() == req_id_input.lower():
@@ -220,18 +235,14 @@ def webhook():
  
                     guardar_data_completa(data_rifa)
  
-                    # 🔹 PREPARAR ID Y NÚMERO DEL USUARIO PARA MENCIÓN Y MENSAJE PRIVADO
                     numero_limpio = user_phone.replace("+", "").strip()
                     user_chat_id = f"{numero_limpio}@s.whatsapp.net"
 
-                    # 1. Respuesta al Administrador (Para ti)
                     enviar_mensaje_whapi(chat_id_actual, f"✅ *Solicitud {req_id_encontrado} APROBADA.* Los números ({nums_formatted}) fueron asignados exitosamente a {user_nombre}.")
 
-                    # 2. Notificación Oficial al Grupo (Mencionando al usuario y SIN la lista completa)
                     msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Usuario:* @{numero_limpio}\n🎟️ *Números asignados:* *{nums_formatted}*\n\n¡Gracias por tu compra y mucha suerte! 🤝"
                     enviar_mensaje_whapi(grupo_origen, msg_grupo, menciones=[user_chat_id])
                     
-                    # 3. Mensaje Automático al Privado del Usuario (Redacción adaptada)
                     msg_privado = (
                         f"🎉 *¡Hola {user_nombre}!* 🎉\n\n"
                         f"Soy el bot asistente de la rifa. El *Administrador General* acaba de verificar tu pago "
@@ -253,7 +264,6 @@ def webhook():
  
                     enviar_mensaje_whapi(chat_id_actual, f"❌ *Solicitud {req_id_encontrado} RECHAZADA.* Los números ({nums_formatted}) vuelven a estar disponibles.")
  
-                    # Notificación de cancelación al grupo
                     msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola {user_nombre}, tu solicitud para el/los número(s) *{nums_formatted}* fue rechazada. Los números vuelven a estar 🟢 *Disponibles* para los demás participantes."
                     enviar_mensaje_whapi(grupo_origen, msg_grupo)
  
@@ -261,8 +271,13 @@ def webhook():
                 enviar_mensaje_whapi(chat_id_actual, f"⚠️ No se encontró la solicitud ID: `{req_id_input}` o ya fue procesada.")
             return "OK", 200
  
-        # ✨ SALUDO / LISTA
-        elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
+        # ✨ SALUDO / LISTA (Lógica Mejorada y Flexible)
+        palabras_clave = ["lista", "rifa", "hola", "buenas", "inicio", "info", "menu", "menú"]
+        
+        # Disparará la lista si escriben exactamente la palabra, O si la palabra "lista" está en la oración pero SIN números
+        es_comando_lista = (comando in palabras_clave) or ("lista" in comando and not any(c.isdigit() for c in comando))
+
+        if es_comando_lista:
             respuesta = (
                 f"¡Hola {nombre_usuario}! Aquí tienes el estado actual de la Rifa. ✨\n\n"
                 f"💵 *Compra uno o varios números por un valor de 10 reales y gana 400 reales.*\n"
@@ -315,7 +330,6 @@ def webhook():
                     return "OK", 200
  
                 if validos_para_reservar:
-                    # Generar ID en minúsculas para evitar descalce
                     req_id = "r" + str(uuid.uuid4().int)[:4]
  
                     for n in validos_para_reservar:
@@ -335,7 +349,6 @@ def webhook():
  
                     nums_solicitados_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
  
-                    # 1. Notificar en el grupo
                     txt_grupo = (
                         f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
                         f"Hola {nombre_usuario}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
@@ -346,7 +359,6 @@ def webhook():
  
                     enviar_mensaje_whapi(chat_id_actual, txt_grupo)
  
-                    # 2. Notificación al chat privado del Administrador General (+5511948824359)
                     link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
                     link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
  
@@ -375,4 +387,3 @@ def webhook():
 if __name__ == "__main__":
     inicializar_rifa()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-     
