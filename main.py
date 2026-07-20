@@ -15,7 +15,7 @@ WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
 # 🔐 FILTRO DE SEGURIDAD MÁSTER: Tu base de teléfono en São Paulo
-NUMERO_ADMIN_SEGURO = "48824359"
+NUMERO_ADMIN_SEGURO = "5511948824359"
 
 # 🔑 TU CLAVE SECRETA DE ADMINISTRADOR PARA RESETEAR
 CLAVE_RESET = "admin.resetear.rifa.99"
