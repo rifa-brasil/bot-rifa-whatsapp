@@ -216,8 +216,8 @@ def webhook():
         elif comando in ["lista"]:
             respuesta = (
                 f"¡Hola {nombre_usuario}! Aquí tienes el estado actual de la Rifa. ✨\n\n"
-                f"💵 *Compra uno o varios números por un valor de 10 reales y gana 400 reales.*\n"
-                f"🏆 El premio se entregará aquí en Brasil mediante transferencia PIX o al familiar en Cuba en CUP.\n\n"
+                f"💵 *Compra uno o varios números por un valor de 10 reales y gana 400. El número ganador se obtendrá del resultado de la Florida Pick3 en la Noche. (Cuando la lista del 1 al 100 esté ocupada completa)*\n"
+                f"🏆 El premio se entregará mediante transferencia PIX o en CUP al familiar en Cuba.\n\n"
                 f"{generar_texto_lista()}"
             )
             if estado_actual_rifa == "activa":
