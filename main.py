@@ -9,8 +9,8 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
  
 # 🔑 TOKEN DE WHAPI (Asegúrate de que en Whapi esté escaneado el QR del +5353215119)
-WHAPI_TOKEN = "zL78J7yS7OM8I3ml5Ybvps1rkcxbKV7K" 
-WHAPI_API_URL = "https://gate.whapi.cloud/messages/text"
+WHAPI_TOKEN = "Cg2jobsnGJdDRFU133QJWSPPwABdNCBP" 
+WHAPI_API_URL = "https://gate.whapi.cloud/"
  
 # 🔑 ID DE RESPALDO DE TU GRUPO
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
