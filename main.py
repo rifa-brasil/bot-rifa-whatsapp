@@ -6,10 +6,12 @@ import random
 from datetime import datetime
 
 app = Flask(name)
+
+# Token de Whapi - lo toma de las variables de Render
 WHAPI_TOKEN = os.environ.get("WHAPI_TOKEN")
 WHAPI_URL = "https://gate.whapi.cloud"
 
-# --- BASE DE DATOS ---
+# --- BASE DE DATOS SQLITE ---
 def init_db():
     conn = sqlite3.connect('rifa.db')
     c = conn.cursor()
@@ -28,8 +30,8 @@ def agregar_participante(numero, nombre):
                   (numero, nombre, datetime.now()))
         conn.commit()
         return True
-    except:
-        return False
+    except sqlite3.IntegrityError:
+        return False # Ya existe
     finally:
         conn.close()
 
@@ -48,46 +50,19 @@ def sortear_ganador():
     ganador = random.choice(participantes)
     return ganador
 
-# --- ENVIAR MENSAJE WHAPI ---
+# --- ENVIAR MENSAJE POR WHAPI ---
 def send_message(to, body):
+    if not WHAPI_TOKEN:
+        print("ERROR: WHAPI_TOKEN no configurado")
+        return
     headers = {"Authorization": f"Bearer {WHAPI_TOKEN}", "Content-Type": "application/json"}
     data = {"to": to, "body": body}
     requests.post(f"{WHAPI_URL}/messages/text", json=data, headers=headers)
 
-# --- WEBHOOK ---
+# --- WEBHOOK PRINCIPAL ---
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json()
-    if 'messages' in data:
+    if 'messages' in data and len(data['messages']) > 0:
         msg = data['messages'][0]
-        numero = msg['from']
-        texto = msg['text']['body'].lower().strip()
-        nombre = msg.get('from_name', 'Participante')
-
-        if texto == 'hola' or texto == '1':
-            respuesta = "🎟️ *BIENVENIDO A LA RIFA BRASIL* 🎟️\n\nResponde con tu NOMBRE COMPLETO para registrarte.\n\nEjemplo: Juan Perez"
-            send_message(numero, respuesta)
-
-        elif texto == 'sortear':
-            ganador = sortear_ganador()
-            if ganador:
-                respuesta = f"🏆 *SORTEO REALIZADO* 🏆\n\nEl ganador es:\n*Nombre:* {ganador[1]}\n*Numero:* {ganador[0]}\n\n¡Felicidades!"
-            else:
-                respuesta = "Aún no hay participantes para sortear 😅"
-            send_message(numero, respuesta)
-
-        else: # Registramos como participante
-            if agregar_participante(numero, texto.title()):
-                respuesta = f"✅ *Registrado con éxito {texto.title()}*\n\nYa estás participando. Mucha suerte!"
-            else:
-                respuesta = f"Ya estás registrado {texto.title()} 😉"
-            send_message(numero, respuesta)
-
-    return "ok", 200
-
-@app.route('/')
-def home():
-    return "Bot de Rifa Activo"
-
-if name == 'main':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+        numero = msg
