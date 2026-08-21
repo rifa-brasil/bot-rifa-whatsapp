@@ -9,8 +9,8 @@ from flask import Flask, request, jsonify
 app = Flask(__name__)
 
 # 🔑 CONFIGURACIÓN DE EVOLUTION API EN RENDER
-EVOLUTION_API_URL = "https://bot-rifa-whatsapp.onrender.com"
-EVOLUTION_API_KEY = "55725d7c0b0fb17cb5e6564edac38c1f"  
+SERVER_URL = "https://bot-rifa-whatsapp.onrender.com"
+AUTHENTICATION_API_KEY = "55725d7c0b0fb17cb5e6564edac38c1f"  
 
 # 🔑 ID DE RESPALDO DE TU GRUPO
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
