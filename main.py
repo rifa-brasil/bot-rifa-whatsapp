@@ -8,17 +8,18 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# 🔑 CONFIGURACIÓN DE EVOLUTION API EN RENDER
-SERVER_URL = "https://bot-rifa-whatsapp.onrender.com"
-AUTHENTICATION_API_KEY = "55725d7c0b0fb17cb5e6564edac38c1f"  
+# 🔑 CONFIGURACIÓN DINÁMICA DESDE LAS VARIABLES DE ENTORNO DE RENDER
+SERVER_URL = os.getenv("SERVER_URL", "https://mi-whatsapp-api-pobo.onrender.com")
+AUTHENTICATION_API_KEY = os.getenv("AUTHENTICATION_API_KEY", "55725d7c0b0fb17cb5e6564edac38c1f")
+INSTANCE_NAME = os.getenv("INSTANCE_NAME", "mi-bot")
 
 # 🔑 ID DE RESPALDO DE TU GRUPO
 GRUPO_CHAT_ID_RESPALDO = "DyI3ISDPZjyKw3w0cD8elC@g.us"
 
-# 👑 1. ADMINISTRADOR GENERAL (ÚNICO AUTORIZADO A CONFIRMAR/RECHAZAR PAGOS)
+# 👑 1. ADMINISTRADOR GENERAL
 WHATSAPP_ADMIN_PHONE = "5511948824359" 
 WHATSAPP_ADMIN_CHAT_ID = f"{WHATSAPP_ADMIN_PHONE}@s.whatsapp.net"
-NUMERO_ADMIN_SEGURO = "48824359" # Tus últimos 8 dígitos
+NUMERO_ADMIN_SEGURO = "48824359" 
 
 # 🤖 2. BOT ASISTENTE ENCARGADO (+5562993984530)
 BOT_ASISTENTE_PHONE = "5562993984530"
@@ -107,7 +108,9 @@ def generar_texto_lista():
     return texto
 
 def enviar_mensaje_evolution(chat_id, texto, menciones=[]):
-    # Adaptado para Evolution API
+    # Endpoint correcto de Evolution API para enviar texto usando la instancia
+    url_envio = f"{SERVER_URL.rstrip('/')}/message/sendText/{INSTANCE_NAME}"
+    
     payload = {
         "number": chat_id,
         "text": texto
@@ -116,13 +119,13 @@ def enviar_mensaje_evolution(chat_id, texto, menciones=[]):
         payload["options"] = {"mentioned": menciones}
 
     headers = {
-        "apikey": EVOLUTION_API_KEY,
+        "apikey": AUTHENTICATION_API_KEY,
         "Content-Type": "application/json"
     }
     try:
-        r = requests.post(EVOLUTION_API_URL, json=payload, headers=headers)
+        r = requests.post(url_envio, json=payload, headers=headers)
         print(f"📤 Envío a {chat_id}: Estado {r.status_code} -> Respuesta: {r.text}")
-        return r.status_code == 200 or r.status_code == 201
+        return r.status_code in [200, 201]
     except Exception as e:
         print(f"🔴 Error al enviar a Evolution API: {e}")
         return False
@@ -138,14 +141,12 @@ def webhook():
         if not data_webhook:
             return "No data", 200
 
-        # Estructura de evento de Evolution API (messages.upsert)
         event = data_webhook.get("event", "")
         if event != "messages.upsert":
             return "Ignored event", 200
 
         data_msg = data_webhook.get("data", {})
         
-        # Ignorar mensajes enviados por el propio bot
         if data_msg.get("key", {}).get("fromMe", False):
             return "Ignored fromMe", 200
 
@@ -157,14 +158,11 @@ def webhook():
         if not mensaje_texto:
             return "No text", 200
 
-        # 🛑 EVITAR BUCLE DE AUTO-RESPUESTA
         if "lista oficial de la rifa" in comando or "participantes convocados" in comando or "tenemos un ganador" in comando:
             return "Ignored loop", 200
 
-        remote_jid = data_msg.get("key", {}.get("remoteJid", ""))
-        sender_pn = data_msg.get("sender", remote_jid) # O el campo donde Evolution provee el remitente
+        remote_jid = data_msg.get("key", {}).get("remoteJid", "")
         
-        # Limpiar número de teléfono del remitente
         numero_persona = re.sub(r'\D', '', remote_jid.split("@")[0])
         
         push_name = data_msg.get("pushName", "")
@@ -177,17 +175,14 @@ def webhook():
         
         respuesta = ""
 
-        # 🔒 FILTRO MÁSTER DE SEGURIDAD
         es_admin_general = (NUMERO_ADMIN_SEGURO in numero_persona) or (WHATSAPP_ADMIN_PHONE in numero_persona)
 
-        # 🔄 COMANDO RESET
         if comando == CLAVE_RESET:
             if not es_admin_general:
                 return "OK", 200
             borrar_y_recrear_base_datos()
             respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles y el sistema está abierto.\n\n" + generar_texto_lista()
 
-        # ✅/❌ APROBACIÓN MANUAL
         elif comando.startswith("confirmar ") or comando.startswith("rechazar "):
             if not es_admin_general:
                 return "OK", 200
@@ -231,14 +226,11 @@ def webhook():
                     numero_limpio = user_phone.replace("+", "").strip()
                     user_chat_id = f"{numero_limpio}@s.whatsapp.net"
 
-                    # 1. Respuesta al Administrador
                     enviar_mensaje_evolution(remote_jid, f"✅ *Solicitud {req_id_encontrado} APROBADA.* Los números ({nums_formatted}) fueron asignados exitosamente a {user_nombre}.")
 
-                    # 2. Notificación Oficial al Grupo
                     msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Usuario:* @{numero_limpio}\n🎟️ *Números asignados:* *{nums_formatted}*\n\n¡Gracias por tu compra y mucha suerte! 🤝"
                     enviar_mensaje_evolution(grupo_origen, msg_grupo, menciones=[user_chat_id])
                     
-                    # 3. Mensaje Automático al Privado del Usuario
                     msg_privado = f"🎉 *¡Hola {user_nombre}!* 🎉\n\nTe confirmo que tu pago ha sido verificado con éxito. Tus números (*{nums_formatted}*) ya están registrados oficialmente a tu nombre en el grupo de la rifa.\n\n¡Mucha suerte! 🍀"
                     enviar_mensaje_evolution(user_chat_id, msg_privado)
 
@@ -260,7 +252,6 @@ def webhook():
                 enviar_mensaje_evolution(remote_jid, f"⚠️ No se encontró la solicitud ID: `{req_id_input}` o ya fue procesada.")
             return "OK", 200
 
-        # ✨ SALUDO / LISTA
         elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
             respuesta = (
                 f"¡Hola {nombre_usuario}! Aquí tienes el estado actual de la Rifa. ✨\n\n"
@@ -271,7 +262,6 @@ def webhook():
             if estado_actual_rifa == "activa":
                 respuesta += "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (ej: *7, 14*)."
 
-        # 🛒 PROCESO DE RESERVAS DE NÚMEROS
         else:
             partes = [p.strip() for p in mensaje_texto.split(",")]
             es_lista_numeros = all(p.isdigit() for p in partes) if partes and mensaje_texto else False
@@ -371,4 +361,3 @@ def webhook():
 if __name__ == "__main__":
     inicializar_rifa()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
