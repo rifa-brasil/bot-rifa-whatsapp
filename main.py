@@ -108,7 +108,6 @@ def generar_texto_lista():
     return texto
 
 def enviar_mensaje_evolution(chat_id, texto, menciones=[]):
-    # Endpoint correcto de Evolution API para enviar texto usando la instancia
     url_envio = f"{SERVER_URL.rstrip('/')}/message/sendText/{INSTANCE_NAME}"
     
     payload = {
@@ -140,6 +139,9 @@ def webhook():
         data_webhook = request.get_json()
         if not data_webhook:
             return "No data", 200
+
+        # REGISTRO CLAVE PARA VER QUÉ RECIBE RENDER
+        print(f"📥 JSON RECIBIDO: {json.dumps(data_webhook, indent=2)}")
 
         event = data_webhook.get("event", "")
         if event != "messages.upsert":
