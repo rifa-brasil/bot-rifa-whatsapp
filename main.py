@@ -21,7 +21,6 @@ async def configurar_webhook_automatico():
         "apikey": EVOLUTION_API_KEY,
         "Content-Type": "application/json"
     }
-    # Obtenemos la URL pública de este mismo servicio en Render de forma automática o usando la fija
     webhook_url = "https://bot-rifa-whatsapp.onrender.com/webhook"
     
     payload = {
@@ -461,7 +460,6 @@ async def procesar_callback_btn(session, from_phone, btn_id):
 # --- FUNCIÓN PRINCIPAL ---
 async def main():
     inicializar_rifa()
-    # Configura el webhook automáticamente en cuanto enciende el bot
     await configurar_webhook_automatico()
     await start_web_server()
 
