@@ -91,10 +91,9 @@ def generar_texto_lista():
             nombre_ocupante = info.get("nombre", "Participante")
             telefono_ocupante = info.get("telefono", "")
             
-            # Si tenemos su teléfono, creamos el enlace directo wa.me para que al hacer clic abra su chat
-            if telefono_ocupante:
+            if telefono_ocupante and len(telefono_ocupante) >= 10:
                 link_chat = f"https://wa.me/{telefono_ocupante}"
-                texto += f"🔴 *{num_str}*: Ocupado por ~{nombre_ocupante}~ 👉 {link_chat}\n"
+                texto += f"🔴 *{num_str}*: Ocupado por {nombre_ocupante} 👉 {link_chat}\n"
             else:
                 texto += f"🔴 *{num_str}*: Ocupado por {nombre_ocupante}\n"
             
@@ -155,30 +154,36 @@ def webhook():
         if not mensaje_texto:
             return "No text", 200
 
-        # Evitar bucles si el bot lee sus propios mensajes anteriores
-        if "lista oficial de la rifa" in comando or "solicitud recibida" in comando or "nuevo mensaje" in comando:
+        # Filtro estricto anti-bucle para ignorar mensajes generados por el propio bot
+        if "lista oficial de la rifa" in comando or "solicitud recibida" in comando or "nueva solicitud" in comando or "pago confirmado" in comando:
             return "Ignored loop", 200
 
-        # --- EXTRACCIÓN LIMPIA DEL REMITENTE ---
+        # --- EXTRACCIÓN LIMPIA Y FILTRADA DE IDENTIFICADORES (EVITA LID Y NÚMEROS EXTRAÑOS) ---
         key_data = data_msg.get("key", {})
         remote_jid = key_data.get("remoteJid", "")
         participant = key_data.get("participant", "")
         
-        jid_real = participant if participant else remote_jid
+        # Seleccionamos la fuente del emisor
+        jid_crudo = participant if participant else remote_jid
         
-        match_jid = re.search(r'(\d{10,15})@', jid_real)
-        if match_jid:
-            numero_persona = match_jid.group(1)
+        # Si contiene '@s.whatsapp.net' y no es un número larguísimo de LID (>15 dígitos antes del arroba)
+        match_num = re.search(r'(\d{10,14})@', jid_crudo)
+        if match_num:
+            numero_persona = match_num.group(1)
         else:
-            digitos = re.sub(r'\D', '', jid_real)
-            numero_persona = digitos[-11:] if len(digitos) >= 11 else (digitos if len(digitos) >= 8 else WHATSAPP_ADMIN_PHONE)
+            # Fallback buscando cualquier cadena numérica limpia de tamaño válido
+            digitos = re.sub(r'\D', '', jid_crudo)
+            if 10 <= len(digitos) <= 14:
+                numero_persona = digitos
+            else:
+                numero_persona = WHATSAPP_ADMIN_PHONE
 
         user_chat_id = f"{numero_persona}@s.whatsapp.net"
 
-        # Nombre real registrado en WhatsApp (pushName)
+        # Nombre real del usuario en WhatsApp (pushName)
         push_name = data_msg.get("pushName", "")
         nombre_usuario = push_name.strip() if push_name else f"Usuario_{numero_persona[-4:]}"
-        # -------------------------------------------------------------
+        # -----------------------------------------------------------------------------------
 
         data_rifa = obtener_data_completa()
         rifa = data_rifa["numeros"]
@@ -237,7 +242,7 @@ def webhook():
 
                     enviar_mensaje_evolution(remote_jid, f"✅ *Solicitud {req_id_encontrado} APROBADA.*")
 
-                    msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Participante:* @{user_phone_clean}\n🎟️ *Números:* *{nums_formatted}*\n\n¡Felicidades! 🤝"
+                    msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Participante:* {user_nombre}\n🎟️ *Números:* *{nums_formatted}*\n\n¡Felicidades! 🤝"
                     enviar_mensaje_evolution(grupo_origen, msg_grupo, menciones=[target_chat_id])
                     
                     msg_privado = f"🎉 *¡Hola {user_nombre}!* 🎉\n\nTu pago fue verificado. Tus números (*{nums_formatted}*) ya están registrados a tu nombre."
@@ -253,7 +258,7 @@ def webhook():
                     guardar_data_completa(data_rifa)
 
                     enviar_mensaje_evolution(remote_jid, f"❌ *Solicitud {req_id_encontrado} RECHAZADA.*")
-                    msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola @{user_phone_clean}, tu solicitud para el/los número(s) *{nums_formatted}* fue rechazada."
+                    msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola {user_nombre}, tu solicitud para el/los número(s) *{nums_formatted}* fue rechazada."
                     enviar_mensaje_evolution(grupo_origen, msg_grupo, menciones=[target_chat_id])
 
             else:
