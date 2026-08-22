@@ -143,8 +143,10 @@ def webhook():
         # REGISTRO CLAVE PARA VER QUÉ RECIBE RENDER
         print(f"📥 JSON RECIBIDO: {json.dumps(data_webhook, indent=2)}")
 
-        event = data_webhook.get("event", "")
-        if event != "messages.upsert":
+        # CORRECCIÓN: Validación flexible para aceptar variantes del evento (minúsculas, mayúsculas o puntos)
+        event = data_webhook.get("event", "").lower()
+        if "messages.upsert" not in event and "messages_upsert" not in event:
+            print(f"⚠️ Evento ignorado o desconocido: {event}")
             return "Ignored event", 200
 
         data_msg = data_webhook.get("data", {})
