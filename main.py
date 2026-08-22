@@ -5,115 +5,116 @@ import asyncio
 from datetime import datetime
 from aiohttp import web
 
-# --- CONFIGURACIÓN DE CREDENCIALES DE WHATSAPP ---
-WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")  
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")  
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "rifa_token_secreto")  
-ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "5562999999999")  
-GRUPO_JID = os.environ.get("GRUPO_JID", "")  # ID del grupo (ej: 1203630... @g.us)
+# --- CONFIGURACIÓN DE EVOLUTION API ---
+EVOLUTION_URL = os.environ.get("EVOLUTION_URL", "").rstrip("/")  # Ej: https://tu-api.onrender.com
+EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")          # Tu Global API Key
+INSTANCE_NAME = os.environ.get("INSTANCE_NAME")                  # Nombre de la instancia en Evolution
+ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "5562999999999")     # Número del admin con código de país sin '+'
 
 DB_FILE = "rifa_db.json"
 
-# --- CLIENTE HTTP GLOBAL PARA ENVIAR MENSAJES A WHATSAPP ---
-async def enviar_mensaje_whatsapp(session, destino_id, text_body, interactive_buttons=None):
-    """Envía un mensaje de texto o interactivo a un usuario privado o a un grupo de WhatsApp."""
-    url = f"https://graph.facebook.com/v17.0/{PHONE_NUMBER_ID}/messages"
+# --- CLIENTE HTTP GLOBAL PARA ENVIAR MENSAJES VÍA EVOLUTION API ---
+async def enviar_mensaje_whatsapp(session, to_phone, text_body, interactive_buttons=None):
+    """Envía un mensaje de texto o con botones interactivos a través de Evolution API."""
+    if not EVOLUTION_URL or not EVOLUTION_API_KEY or not INSTANCE_NAME:
+        print("Error: Faltan variables de entorno de Evolution API (EVOLUTION_URL, EVOLUTION_API_KEY, INSTANCE_NAME).")
+        return
+
+    # Limpiar número (asegurar formato de JID o número puro de WhatsApp)
+    remote_jid = f"{to_phone}@s.whatsapp.net" if "@" not in str(to_phone) else to_phone
+
     headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "apikey": EVOLUTION_API_KEY,
         "Content-Type": "application/json",
     }
-    
-    payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": destino_id,
-        "type": "text"
-    }
-
-    # Si el destino es un grupo (termina en @g.us), quitamos 'recipient_type' porque Meta lo rechaza en grupos
-    if "@g.us" in str(destino_id):
-        payload.pop("recipient_type", None)
 
     if interactive_buttons:
-        payload["type"] = "interactive"
-        payload["interactive"] = {
-            "type": "button",
-            "body": {"text": text_body},
-            "action": {
-                "buttons": [
-                    {"type": "reply", "reply": {"id": btn["id"], "title": btn["title"][:20]}}
-                    for btn in interactive_buttons[:3]
-                ]
-            }
+        # Envío con botones interactivos en Evolution API
+        url = f"{EVOLUTION_URL}/message/sendButtons/{INSTANCE_NAME}"
+        buttons_payload = [
+            {"type": "reply", "displayText": btn["title"][:20], "id": btn["id"]}
+            for btn in interactive_buttons[:3]
+        ]
+        payload = {
+            "number": remote_jid,
+            "title": "Gran Sorteo 100",
+            "description": text_body,
+            "footer": "Selecciona una opción",
+            "buttons": buttons_payload
         }
     else:
-        payload["text"] = {"body": text_body, "preview_url": False}
+        # Envío de texto plano
+        url = f"{EVOLUTION_URL}/message/sendText/{INSTANCE_NAME}"
+        payload = {
+            "number": remote_jid,
+            "text": text_body
+        }
 
     try:
         async with session.post(url, headers=headers, json=payload) as resp:
-            if resp.status != 200:
+            if resp.status not in [200, 201]:
                 body_err = await resp.text()
-                print(f"Error al enviar mensaje WhatsApp a {destino_id} ({resp.status}): {body_err}")
+                print(f"Error al enviar mensaje Evolution API ({resp.status}): {body_err}")
     except Exception as e:
-        print(f"Excepción enviando mensaje a WhatsApp: {e}")
+        print(f"Excepción enviando mensaje vía Evolution API: {e}")
 
 # --- SERVIDOR WEB Y WEBHOOK PARA RENDER ---
-async def handle_get_webhook(request):
-    hub_mode = request.query.get("hub.mode")
-    hub_challenge = request.query.get("hub.challenge")
-    hub_verify_token = request.query.get("hub.verify_token")
-
-    if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
-        return web.Response(text=hub_challenge, status=200)
-    return web.Response(text="Fallo de verificación de token", status=403)
-
 async def handle_post_webhook(request):
+    """Recepción de mensajes y eventos interactivos enviados por Evolution API."""
     try:
         body = await request.json()
-        for entry in body.get("entry", []):
-            for change in entry.get("changes", []):
-                value = change.get("value", {})
-                
-                contacts = value.get("contacts", [])
-                nombre_contacto = "Usuario"
-                if contacts:
-                    nombre_contacto = contacts[0].get("profile", {}).get("name", "Usuario")
+        print(f"Webhook recibido: {body.get('event')}")
 
-                messages = value.get("messages", [])
-                if messages:
-                    msg = messages[0]
-                    from_phone = msg.get("from")  
-                    msg_type = msg.get("type")
-                    
-                    # Verificamos si el mensaje viene de un grupo o de un chat privado
-                    chat_id_or_sender = msg.get("chat_id") or from_phone
-                    # Si el mensaje viene de un grupo, el 'from' suele ser el usuario pero el chat de origen es el grupo.
-                    # Meta Cloud API envía el ID del grupo en el campo 'to' o en contextos de grupo. 
-                    # Lo más seguro es procesar el texto y responder al usuario en privado o al grupo según corresponda.
-                    
-                    async with aiohttp.ClientSession() as session:
-                        if msg_type == "text":
-                            text_content = msg.get("text", {}).get("body", "").strip()
-                            await procesar_mensaje_entrante(session, from_phone, nombre_contacto, text_content)
-                        elif msg_type == "interactive":
-                            interactive_data = msg.get("interactive", {})
-                            if interactive_data.get("type") == "button_reply":
-                                btn_id = interactive_data.get("button_reply", {}).get("id")
-                                await procesar_callback_btn(session, from_phone, btn_id)
-                                
+        # Evolution API suele enviar el evento 'messages.upsert'
+        event_type = body.get("event")
+        
+        if event_type == "messages.upsert" or "data" in body:
+            data_payload = body.get("data", {})
+            
+            # Extraer información del mensaje desde la estructura de Evolution
+            key = data_payload.get("key", {})
+            if key.get("fromMe", False):
+                return web.Response(text="OK", status=200)
+
+            remote_jid = key.get("remoteJid", "")
+            # Extraer el número de teléfono limpio desde el JID (ej: 556299999999@s.whatsapp.net -> 556299999999)
+            from_phone = remote_jid.split("@")[0] if "@" in remote_jid else remote_jid
+
+            message_data = data_payload.get("message", {})
+            
+            texto_mensaje = ""
+            btn_id_pulsado = None
+
+            # Detectar mensaje de texto plano
+            if "conversation" in message_data:
+                texto_mensaje = message_data.get("conversation", "").strip()
+            elif "extendedTextMessage" in message_data:
+                texto_mensaje = message_data.get("extendedTextMessage", {}).get("text", "").strip()
+            
+            # Detectar respuesta a botón interactivo en Evolution API
+            elif "buttonsResponseMessage" in message_data:
+                btn_id_pulsado = message_data.get("buttonsResponseMessage", {}).get("selectedButtonId")
+            elif "templateButtonReplyMessage" in message_data:
+                btn_id_pulsado = message_data.get("templateButtonReplyMessage", {}).get("selectedId")
+
+            async with aiohttp.ClientSession() as session:
+                if btn_id_pulsado:
+                    await procesar_callback_btn(session, from_phone, btn_id_pulsado)
+                elif texto_mensaje:
+                    await procesar_mensaje_entrante(session, from_phone, texto_mensaje)
+
         return web.Response(text="EVENT_RECEIVED", status=200)
     except Exception as e:
-        print(f"Error procesando webhook POST: {e}")
+        print(f"Error procesando webhook POST de Evolution: {e}")
         return web.Response(text="OK", status=200)
 
 async def handle_web(request):
-    return web.Response(text="Bot de Rifa WhatsApp Activo y en Línea 24/7!")
+    return web.Response(text="Bot de Rifa con Evolution API Activo y en Línea 24/7!")
 
 async def start_web_server():
     app = web.Application()
     app.router.add_get("/", handle_web)
-    app.router.add_get("/webhook", handle_get_webhook)
-    app.router.add_post("/webhook", handle_post_webhook)
+    app.router.add_post("/webhook", handle_post_webhook)  # Endpoint único donde Evolution mandará los eventos
     
     runner = web.AppRunner(app)
     await runner.setup()
@@ -121,7 +122,7 @@ async def start_web_server():
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"🌐 Servidor web y Webhook corriendo en el puerto {port}")
+    print(f"🌐 Servidor web y Webhook de Evolution corriendo en el puerto {port}")
 
 # --- GESTIÓN DE BASE DE DATOS JSON ---
 def inicializar_rifa():
@@ -263,8 +264,8 @@ def obtener_texto_reglas(lang="es"):
             "📌 *REGLAS Y DINÁMICA DEL GRUPO (Gran Sorteo 100):*\n\n"
             "1️⃣ *Respeto:* Mantén un ambiente de respeto absoluto.\n"
             "2️⃣ *Números y Promoción:* 100 números (del 01 al 100).\n"
-            f"• 1 núm = {VALOR_POR_NUMERO} reales | • 5 núm = {int(VALOR_POR_NUMERO * 4)} reais (Promoción 1ra jogada).\n"
-            f"⚠️ A partir de tu 2da jogada, cada número cuesta exactamente {VALOR_POR_NUMERO} reales.\n"
+            f"• 1 núm = {VALOR_POR_NUMERO} reales | • 5 núm = {int(VALOR_POR_NUMERO * 4)} reais (Promoción 1ra jugada).\n"
+            f"⚠️ A partir de tu 2da jugada, cada número cuesta exactamente {VALOR_POR_NUMERO} reales.\n"
             "Envía `lista` para ver los disponibles y escribe los que deseas separados por coma (ej: *7, 14*).\n"
             "3️⃣ El sorteo se realiza cuando los 100 números estén ocupados y pagados.\n"
             "4️⃣ Garantía de devolución íntegra con el administrador.\n"
@@ -273,7 +274,7 @@ def obtener_texto_reglas(lang="es"):
         )
 
 # --- PROCESADOR DE MENSAJES ---
-async def procesar_mensaje_entrante(session, from_phone, nombre_contacto, mensaje_texto):
+async def procesar_mensaje_entrante(session, from_phone, mensaje_texto):
     comando = mensaje_texto.lower()
     data_rifa = obtener_data_completa()
     idiomas = data_rifa.get("idiomas_usuarios", {})
@@ -350,7 +351,7 @@ async def procesar_mensaje_entrante(session, from_phone, nombre_contacto, mensaj
                 rifa[n]["estado"] = "pendiente"
 
             solicitudes[req_id] = {
-                "nombre": nombre_contacto,
+                "nombre": f"Usuario_{from_phone[-4:]}",
                 "user_id": from_phone,
                 "numeros": validos_para_reservar
             }
@@ -372,14 +373,14 @@ async def procesar_mensaje_entrante(session, from_phone, nombre_contacto, mensaj
             )
             await enviar_mensaje_whatsapp(session, from_phone, msg_usuario)
 
-            # Notificar al Administrador con botones interactivos
+            # Notificar al Administrador con botones interactivos de aprobación/rechazo
             botones_admin = [
                 {"id": f"conf_{req_id}", "title": "🟢 Aprobar"},
                 {"id": f"rech_{req_id}", "title": "🔴 Rechazar"}
             ]
             msg_admin = (
                 f"📥 *NUEVA SOLICITUD* (ID: `{req_id}`)\n"
-                f"👤 *Cliente:* {nombre_contacto} ({from_phone})\n"
+                f"📱 *Teléfono:* {from_phone}\n"
                 f"🎟️ *Números:* *{nums_solicitados_txt}*\n"
                 f"💵 *Total:* *{total_a_pagar} reales*"
             )
@@ -389,6 +390,7 @@ async def procesar_mensaje_entrante(session, from_phone, nombre_contacto, mensaj
 async def procesar_callback_btn(session, from_phone, btn_id):
     data_rifa = obtener_data_completa()
 
+    # Selección de Idioma
     if btn_id.startswith("lang_"):
         lang = btn_id.split("_")[1]
         if "idiomas_usuarios" not in data_rifa:
@@ -400,6 +402,7 @@ async def procesar_callback_btn(session, from_phone, btn_id):
         await enviar_mensaje_whatsapp(session, from_phone, texto_resp, interactive_buttons=generar_teclado_idioma())
         return
 
+    # Acciones del Administrador (Aprobar / Rechazar)
     if from_phone != ADMIN_PHONE:
         return
 
@@ -413,14 +416,13 @@ async def procesar_callback_btn(session, from_phone, btn_id):
 
     sol = solicitudes[req_id]
     user_phone = sol["user_id"]
-    user_nombre = sol["nombre"]
     user_nums = sol["numeros"]
     nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
 
     if accion == "conf":
         for n in user_nums:
             rifa[n]["estado"] = "ocupado"
-            rifa[n]["nombre"] = user_nombre
+            rifa[n]["nombre"] = f"Cliente_{user_phone[-4:]}"
             rifa[n]["user_id"] = user_phone
 
         del solicitudes[req_id]
@@ -433,14 +435,8 @@ async def procesar_callback_btn(session, from_phone, btn_id):
         guardar_data_completa(data_rifa)
         await enviar_mensaje_whatsapp(session, ADMIN_PHONE, f"✅ Aprobado con éxito. Números: {nums_formatted}")
 
-        # Mensaje al privado del usuario
         msg_confirmacion = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\nTus números ({nums_formatted}) ya están oficiales. ¡Muchas felicidades y mucha suerte! 🤝"
         await enviar_mensaje_whatsapp(session, user_phone, msg_confirmacion)
-
-        # Enviar aviso público al grupo configurado en GRUPO_JID en Render
-        if GRUPO_JID:
-            msg_grupo = f"🎉 *¡NUEVA JUGADA APROBADA!* 🎉\n\n👤 *Participante:* {user_nombre}\n🎟️ *Números asignados:* {nums_formatted}\n\n{generar_texto_lista('es')}"
-            await enviar_mensaje_whatsapp(session, GRUPO_JID, msg_grupo)
 
     elif accion == "rech":
         for n in user_nums:
