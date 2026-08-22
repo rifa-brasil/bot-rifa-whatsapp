@@ -93,7 +93,7 @@ def generar_texto_lista():
             telefono_ocupante = info.get("telefono", "")
             
             if telefono_ocupante:
-                texto += f"🔴 *{num_str}*: Ocupado por [{nombre_ocupante}](https://wa.me/{telefono_ocupante})\n"
+                texto += f"🔴 *{num_str}*: Ocupado por ~{nombre_ocupante}~ (https://wa.me/{telefono_ocupante})\n"
             else:
                 texto += f"🔴 *{num_str}*: Ocupado por *{nombre_ocupante}*\n"
             
@@ -158,23 +158,24 @@ def webhook():
         if not mensaje_texto:
             return "No text", 200
 
-        # Extracción mejorada para capturar el número real de WhatsApp ignorando LIDs de Meta
+        # Extracción segura y directa del emisor real del mensaje
         key_data = data_msg.get("key", {})
         remote_jid = key_data.get("remoteJid", "")
         participant = key_data.get("participant", "")
         
-        # Si viene de un grupo, el participante real está en 'participant', si es privado en 'remoteJid'
         jid_crudo = participant if participant else remote_jid
         
-        # Extraemos todos los dígitos
+        # Extraemos los números limpios del JID
         digitos_puros = re.sub(r'\D', '', jid_crudo)
         
-        # Verificamos si es un número válido (evitando los IDs largos de LID que suelen tener más de 15 dígitos)
-        if 10 <= len(digitos_puros) <= 14:
-            numero_persona = digitos_puros
+        if len(digitos_puros) >= 8:
+            # Si viene con sufijo de LID o número largo, tomamos los dígitos correctos del usuario móvil
+            if "@s.whatsapp.net" in jid_crudo or "@c.us" in jid_crudo or "@g.us" not in jid_crudo:
+                numero_persona = digitos_puros[-13:] if len(digitos_puros) >= 13 else digitos_puros
+            else:
+                numero_persona = digitos_puros[-11:]
         else:
-            # Si el JID trae un LID cifrado, buscamos en el objeto si hay otro campo o usamos respaldo
-            numero_persona = WHATSAPP_ADMIN_PHONE
+            numero_persona = digitos_puros
 
         user_chat_id = f"{numero_persona}@s.whatsapp.net"
 
@@ -334,6 +335,7 @@ def webhook():
 
                     nums_solicitados_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
 
+                    # Mensaje al grupo sin enlaces aislados para evitar tarjetas de vista previa (Share on WhatsApp)
                     txt_grupo = (
                         f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
                         f"Hola @{numero_persona}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
@@ -344,17 +346,14 @@ def webhook():
 
                     enviar_mensaje_evolution(remote_jid, txt_grupo, menciones=[user_chat_id])
 
-                    link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
-                    link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
-
-                    # Mensaje al admin con el nombre del usuario convertido en enlace directo limpio (https://wa.me/...) sin tarjeta de preview
+                    # Mensaje al administrador con formato limpio sin saltos solitarios de enlaces
                     txt_admin = (
                         f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                        f"👤 *Cliente:* [{nombre_usuario}](https://wa.me/{numero_persona})\n"
+                        f"👤 *Cliente:* {nombre_usuario} (wa.me/{numero_persona})\n"
                         f"🎟️ *Números:* *{nums_solicitados_txt}*\n\n"
                         f"Toca una opción para responder:\n\n"
-                        f"🟢 *[ CONFIRMAR PAGO ]*\nhttps://wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}\n\n"
-                        f"🔴 *[ RECHAZAR PAGO ]*\nhttps://wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
+                        f"🟢 *[ CONFIRMAR PAGO ]*\nEnlace directo: https://wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}\n\n"
+                        f"🔴 *[ RECHAZAR PAGO ]*\nEnlace directo: https://wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
                     )
                     
                     enviar_mensaje_evolution(WHATSAPP_ADMIN_CHAT_ID, txt_admin)
