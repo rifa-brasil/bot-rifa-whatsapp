@@ -10,13 +10,13 @@ WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")  
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "rifa_token_secreto")  
 ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "5562999999999")  
-GRUPO_JID = os.environ.get("GRUPO_JID", "")  # Opcional: JID o ID del grupo de WhatsApp si deseas notificar allí directamente
+GRUPO_JID = os.environ.get("GRUPO_JID", "")  # ID del grupo (ej: 1203630... @g.us)
 
 DB_FILE = "rifa_db.json"
 
 # --- CLIENTE HTTP GLOBAL PARA ENVIAR MENSAJES A WHATSAPP ---
-async def enviar_mensaje_whatsapp(session, to_phone_or_chat, text_body, interactive_buttons=None):
-    """Envía un mensaje de texto limpio (sin vista previa ni tarjetas) o interactivo con botones."""
+async def enviar_mensaje_whatsapp(session, destino_id, text_body, interactive_buttons=None):
+    """Envía un mensaje de texto o interactivo a un usuario privado o a un grupo de WhatsApp."""
     url = f"https://graph.facebook.com/v17.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
@@ -26,9 +26,13 @@ async def enviar_mensaje_whatsapp(session, to_phone_or_chat, text_body, interact
     payload = {
         "messaging_product": "whatsapp",
         "recipient_type": "individual",
-        "to": to_phone_or_chat,
+        "to": destino_id,
         "type": "text"
     }
+
+    # Si el destino es un grupo (termina en @g.us), quitamos 'recipient_type' porque Meta lo rechaza en grupos
+    if "@g.us" in str(destino_id):
+        payload.pop("recipient_type", None)
 
     if interactive_buttons:
         payload["type"] = "interactive"
@@ -43,14 +47,13 @@ async def enviar_mensaje_whatsapp(session, to_phone_or_chat, text_body, interact
             }
         }
     else:
-        # preview_url=False y estructura limpia evita que aparezcan botones automáticos o tarjetas de chat
         payload["text"] = {"body": text_body, "preview_url": False}
 
     try:
         async with session.post(url, headers=headers, json=payload) as resp:
             if resp.status != 200:
                 body_err = await resp.text()
-                print(f"Error al enviar mensaje WhatsApp ({resp.status}): {body_err}")
+                print(f"Error al enviar mensaje WhatsApp a {destino_id} ({resp.status}): {body_err}")
     except Exception as e:
         print(f"Excepción enviando mensaje a WhatsApp: {e}")
 
@@ -61,7 +64,6 @@ async def handle_get_webhook(request):
     hub_verify_token = request.query.get("hub.verify_token")
 
     if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
-        print("Webhook verificado correctamente por Meta.")
         return web.Response(text=hub_challenge, status=200)
     return web.Response(text="Fallo de verificación de token", status=403)
 
@@ -72,7 +74,6 @@ async def handle_post_webhook(request):
             for change in entry.get("changes", []):
                 value = change.get("value", {})
                 
-                # Extraer nombre del contacto si viene en la carga útil
                 contacts = value.get("contacts", [])
                 nombre_contacto = "Usuario"
                 if contacts:
@@ -83,6 +84,12 @@ async def handle_post_webhook(request):
                     msg = messages[0]
                     from_phone = msg.get("from")  
                     msg_type = msg.get("type")
+                    
+                    # Verificamos si el mensaje viene de un grupo o de un chat privado
+                    chat_id_or_sender = msg.get("chat_id") or from_phone
+                    # Si el mensaje viene de un grupo, el 'from' suele ser el usuario pero el chat de origen es el grupo.
+                    # Meta Cloud API envía el ID del grupo en el campo 'to' o en contextos de grupo. 
+                    # Lo más seguro es procesar el texto y responder al usuario en privado o al grupo según corresponda.
                     
                     async with aiohttp.ClientSession() as session:
                         if msg_type == "text":
@@ -256,8 +263,8 @@ def obtener_texto_reglas(lang="es"):
             "📌 *REGLAS Y DINÁMICA DEL GRUPO (Gran Sorteo 100):*\n\n"
             "1️⃣ *Respeto:* Mantén un ambiente de respeto absoluto.\n"
             "2️⃣ *Números y Promoción:* 100 números (del 01 al 100).\n"
-            f"• 1 núm = {VALOR_POR_NUMERO} reales | • 5 núm = {int(VALOR_POR_NUMERO * 4)} reais (Promoción 1ra jugada).\n"
-            f"⚠️ A partir de tu 2da jugada, cada número cuesta exactamente {VALOR_POR_NUMERO} reales.\n"
+            f"• 1 núm = {VALOR_POR_NUMERO} reales | • 5 núm = {int(VALOR_POR_NUMERO * 4)} reais (Promoción 1ra jogada).\n"
+            f"⚠️ A partir de tu 2da jogada, cada número cuesta exactamente {VALOR_POR_NUMERO} reales.\n"
             "Envía `lista` para ver los disponibles y escribe los que deseas separados por coma (ej: *7, 14*).\n"
             "3️⃣ El sorteo se realiza cuando los 100 números estén ocupados y pagados.\n"
             "4️⃣ Garantía de devolución íntegra con el administrador.\n"
@@ -342,7 +349,6 @@ async def procesar_mensaje_entrante(session, from_phone, nombre_contacto, mensaj
             for n in validos_para_reservar:
                 rifa[n]["estado"] = "pendiente"
 
-            # Guardamos el nombre real del contacto obtenido directamente de WhatsApp
             solicitudes[req_id] = {
                 "nombre": nombre_contacto,
                 "user_id": from_phone,
@@ -366,7 +372,7 @@ async def procesar_mensaje_entrante(session, from_phone, nombre_contacto, mensaj
             )
             await enviar_mensaje_whatsapp(session, from_phone, msg_usuario)
 
-            # Notificar al Administrador con botones interactivos de aprobación/rechazo
+            # Notificar al Administrador con botones interactivos
             botones_admin = [
                 {"id": f"conf_{req_id}", "title": "🟢 Aprobar"},
                 {"id": f"rech_{req_id}", "title": "🔴 Rechazar"}
@@ -383,7 +389,6 @@ async def procesar_mensaje_entrante(session, from_phone, nombre_contacto, mensaj
 async def procesar_callback_btn(session, from_phone, btn_id):
     data_rifa = obtener_data_completa()
 
-    # Selección de Idioma
     if btn_id.startswith("lang_"):
         lang = btn_id.split("_")[1]
         if "idiomas_usuarios" not in data_rifa:
@@ -395,7 +400,6 @@ async def procesar_callback_btn(session, from_phone, btn_id):
         await enviar_mensaje_whatsapp(session, from_phone, texto_resp, interactive_buttons=generar_teclado_idioma())
         return
 
-    # Acciones del Administrador (Aprobar / Rechazar)
     if from_phone != ADMIN_PHONE:
         return
 
@@ -429,13 +433,13 @@ async def procesar_callback_btn(session, from_phone, btn_id):
         guardar_data_completa(data_rifa)
         await enviar_mensaje_whatsapp(session, ADMIN_PHONE, f"✅ Aprobado con éxito. Números: {nums_formatted}")
 
-        # Mensaje de confirmación al privado del usuario
+        # Mensaje al privado del usuario
         msg_confirmacion = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\nTus números ({nums_formatted}) ya están oficiales. ¡Muchas felicidades y mucha suerte! 🤝"
         await enviar_mensaje_whatsapp(session, user_phone, msg_confirmacion)
 
-        # Enviar aviso público al grupo (si configuraste GRUPO_JID en Render) o al admin/grupo general
-        msg_grupo = f"🎉 *¡NUEVA JUGADA APROBADA!* 🎉\n\n👤 *Participante:* {user_nombre}\n🎟️ *Números asignados:* {nums_formatted}\n\n{generar_texto_lista('es')}"
+        # Enviar aviso público al grupo configurado en GRUPO_JID en Render
         if GRUPO_JID:
+            msg_grupo = f"🎉 *¡NUEVA JUGADA APROBADA!* 🎉\n\n👤 *Participante:* {user_nombre}\n🎟️ *Números asignados:* {nums_formatted}\n\n{generar_texto_lista('es')}"
             await enviar_mensaje_whatsapp(session, GRUPO_JID, msg_grupo)
 
     elif accion == "rech":
