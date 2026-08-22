@@ -133,17 +133,22 @@ def enviar_mensaje_evolution(chat_id, texto, menciones=[]):
 def home():
     return "Servidor conectado con Evolution API listo.", 200
 
-@app.route("/webhook", methods=["POST"])
+@app.route("/webhook", methods=["POST", "GET"])
 def webhook():
+    print("🚨 ¡ALGUIEN TOCÓ LA RUTA /WEBHOOK! 🚨")
     try:
-        data_webhook = request.get_json()
+        data_webhook = request.get_json(silent=True)
         if not data_webhook:
+            # Por si acaso llega en formato form o texto plano
+            data_webhook = request.form.to_dict()
+
+        if not data_webhook:
+            print("⚠️ Webhook recibido sin datos JSON legibles.")
             return "No data", 200
 
         # REGISTRO CLAVE PARA VER QUÉ RECIBE RENDER
         print(f"📥 JSON RECIBIDO: {json.dumps(data_webhook, indent=2)}")
 
-        # CORRECCIÓN: Validación flexible para aceptar variantes del evento (minúsculas, mayúsculas o puntos)
         event = data_webhook.get("event", "").lower()
         if "messages.upsert" not in event and "messages_upsert" not in event:
             print(f"⚠️ Evento ignorado o desconocido: {event}")
