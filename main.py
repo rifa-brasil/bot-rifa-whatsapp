@@ -168,28 +168,36 @@ def webhook():
         if "lista oficial de la rifa" in comando or "participantes convocados" in comando or "tenemos un ganador" in comando:
             return "Ignored loop", 200
 
-        # --- EXTRACCIÓN LIMPIA DEL NÚMERO Y NOMBRE DE USUARIO ---
-        remote_jid = data_msg.get("key", {}).get("remoteJid", "")
-        participant = data_msg.get("key", {}).get("participant", "")
+        # --- EXTRACCIÓN ROBUSTA Y PRECISA DEL REMITENTE Y NÚMERO ---
+        key_data = data_msg.get("key", {})
+        remote_jid = key_data.get("remoteJid", "")
+        participant = key_data.get("participant", "")
+        sender_alt = data_msg.get("sender", "")
+
+        # Determinamos de dónde sacar el JID real del usuario que escribe
+        candidato_jid = participant if participant else (sender_alt if sender_alt else remote_jid)
         
-        # El JID real es participant si viene de un grupo, sino remote_jid
-        jid_origen = participant if participant else remote_jid
-        
-        # Extraemos solo los dígitos (limpia "@s.whatsapp.net" y sufijos lid raros)
-        if "@s.whatsapp.net" in jid_origen:
-            numero_persona = re.sub(r'\D', '', jid_origen.split("@")[0])
+        # Si viene un JID completo de WhatsApp (ej: 5511948824359@s.whatsapp.net o con sufijos lid)
+        match_jid = re.search(r'(\d{10,15})@', candidato_jid)
+        if match_jid:
+            numero_persona = match_jid.group(1)
         else:
-            digitos = re.sub(r'\D', '', jid_origen)
-            numero_persona = digitos[-13:] if len(digitos) > 13 else digitos
-            
-        # Fallback de seguridad
-        if not numero_persona or len(numero_persona) < 8:
+            # Si no tiene @s.whatsapp.net, buscamos cualquier bloque de 10 a 15 dígitos que parezca un número telefónico real
+            digitos_todos = re.sub(r'\D', '', candidato_jid)
+            if len(digitos_todos) >= 10:
+                # Tomamos los últimos 13 dígitos o el bloque que corresponda a celular
+                numero_persona = digitos_todos[-11:] if len(digitos_todos) >= 11 else digitos_todos
+            else:
+                # Si por alguna razón extraña llega el remote_jid del grupo puro, intentamos extraer del pushName o usar admin de respaldo
+                numero_persona = WHATSAPP_ADMIN_PHONE
+
+        # Validamos que el número tenga longitud lógica de teléfono (ej Brasil/Cuba/otros >= 10 dígitos)
+        if len(numero_persona) < 8:
             numero_persona = WHATSAPP_ADMIN_PHONE
 
-        # Nombre del usuario
         push_name = data_msg.get("pushName", "")
         nombre_usuario = push_name.strip() if push_name else f"+{numero_persona}"
-        # ---------------------------------------------------------
+        # -------------------------------------------------------------
 
         data_rifa = obtener_data_completa()
         rifa = data_rifa["numeros"]
@@ -228,7 +236,7 @@ def webhook():
                 grupo_origen = sol["grupo_id"]
 
                 nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
-                numero_limpio = user_phone.replace("+", "").strip()
+                numero_limpio = re.sub(r'\D', '', user_phone)
                 user_chat_id = f"{numero_limpio}@s.whatsapp.net"
 
                 if accion == "confirmar":
@@ -250,11 +258,11 @@ def webhook():
 
                     enviar_mensaje_evolution(remote_jid, f"✅ *Solicitud {req_id_encontrado} APROBADA.* Los números ({nums_formatted}) fueron asignados exitosamente a {user_nombre}.")
 
-                    # Mensaje al grupo con mención azul
+                    # Mensaje al grupo con mención azul interactiva
                     msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Usuario:* @{numero_limpio} (+{numero_limpio})\n🎟️ *Números asignados:* *{nums_formatted}*\n\n¡Gracias por tu compra y mucha suerte! 🤝"
                     enviar_mensaje_evolution(grupo_origen, msg_grupo, menciones=[user_chat_id])
                     
-                    # Mensaje privado
+                    # Mensaje privado al usuario
                     msg_privado = f"🎉 *¡Hola {user_nombre}!* 🎉\n\nTe confirmo que tu pago ha sido verificado con éxito. Tus números (*{nums_formatted}*) ya están registrados oficialmente a tu nombre en el grupo de la rifa.\n\n¡Mucha suerte! 🍀"
                     enviar_mensaje_evolution(user_chat_id, msg_privado)
 
@@ -269,7 +277,6 @@ def webhook():
 
                     enviar_mensaje_evolution(remote_jid, f"❌ *Solicitud {req_id_encontrado} RECHAZADA.* Los números ({nums_formatted}) vuelven a estar disponibles.")
                     
-                    # Mensaje al grupo de rechazo
                     msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola @{numero_limpio}, tu solicitud para el/los número(s) *{nums_formatted}* fue rechazada. Los números vuelven a estar 🟢 *Disponibles* para los demás participantes."
                     enviar_mensaje_evolution(grupo_origen, msg_grupo, menciones=[user_chat_id])
 
@@ -348,7 +355,7 @@ def webhook():
 
                     nums_solicitados_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
 
-                    # Mención en azul de solicitud al grupo
+                    # Mensaje de solicitud al grupo con mención azul
                     txt_grupo = (
                         f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
                         f"Hola @{numero_persona}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
@@ -363,7 +370,7 @@ def webhook():
                     link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
                     link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
 
-                    # Notificación al administrador
+                    # Mensaje de notificación al administrador
                     txt_admin = (
                         f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                         f"👤 *Cliente:* {nombre_usuario}\n"
