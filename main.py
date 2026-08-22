@@ -28,7 +28,6 @@ CLAVE_RESET = "admin.resetear.rifa.99"
 
 DB_FILE = "rifa_db.json"
 
-# Memoria temporal para evitar mensajes duplicados (antidoble)
 mensajes_procesados_recientes = set()
 
 def inicializar_rifa():
@@ -93,9 +92,8 @@ def generar_texto_lista():
             nombre_ocupante = info.get("nombre", "Participante")
             telefono_ocupante = info.get("telefono", "")
             
-            # Mostramos el nombre exacto de WhatsApp y enlace directo limpio al chat
             if telefono_ocupante:
-                link_chat = f"https://wa.me/{telefono_ocupante}"
+                link_chat = f"wa.me/{telefono_ocupante}"
                 texto += f"🔴 *{num_str}*: Ocupado por *{nombre_ocupante}* 👉 {link_chat}\n"
             else:
                 texto += f"🔴 *{num_str}*: Ocupado por *{nombre_ocupante}*\n"
@@ -145,7 +143,6 @@ def webhook():
         if data_msg.get("key", {}).get("fromMe", False):
             return "Ignored fromMe", 200
 
-        # --- BLOQUEO ANTIDOBLE (Evita que el mismo mensaje se procese 2 veces) ---
         msg_id = data_msg.get("key", {}).get("id", "")
         if msg_id in mensajes_procesados_recientes:
             return "Ignored duplicate", 200
@@ -153,7 +150,6 @@ def webhook():
             mensajes_procesados_recientes.add(msg_id)
             if len(mensajes_procesados_recientes) > 100:
                 mensajes_procesados_recientes.pop()
-        # ------------------------------------------------------------------------
 
         message_content = data_msg.get("message", {})
         mensaje_texto = message_content.get("conversation", "") or message_content.get("extendedTextMessage", {}).get("text", "")
@@ -163,24 +159,26 @@ def webhook():
         if not mensaje_texto:
             return "No text", 200
 
-        # Extracción limpia del número real y del nombre exacto de WhatsApp (pushName)
+        # Extracción robusta del número real evitando LIDs o prefijos incorrectos
         key_data = data_msg.get("key", {})
         remote_jid = key_data.get("remoteJid", "")
         participant = key_data.get("participant", "")
         
         jid_crudo = participant if participant else remote_jid
         
-        # Extraer solo dígitos limpios del número de teléfono real
+        # Filtramos estrictamente para extraer números de teléfono móviles válidos (ej Brasil 55 + DDD + 8/9 dígitos)
         digitos_puros = re.sub(r'\D', '', jid_crudo)
-        if len(digitos_puros) >= 10:
-            # Tomamos los últimos 11 o 12 dígitos válidos que corresponden al número móvil con DDI/DDD
-            numero_persona = digitos_puros[-13:] if len(digitos_puros) >= 13 else digitos_puros[-11:]
+        if len(digitos_puros) >= 11:
+            # Tomamos los últimos 11 o 12 dígitos correspondientes al número real con DDD
+            numero_persona = digitos_puros[-11:] if len(digitos_puros) == 11 else digitos_puros[-12:]
+            # Si por capricho de whatsapp trae un DDI incorrecto largo, lo ajustamos al número brasileño estándar de tu zona si empieza por 55
+            if digitos_puros.startswith("55") and len(digitos_puros) >= 12:
+                numero_persona = digitos_puros[-13:] if len(digitos_puros) >= 13 else digitos_puros[-12:]
         else:
             numero_persona = WHATSAPP_ADMIN_PHONE
 
         user_chat_id = f"{numero_persona}@s.whatsapp.net"
 
-        # Nombre real de WhatsApp tal y como está registrado (pushName)
         push_name = data_msg.get("pushName", "")
         nombre_usuario = push_name.strip() if push_name else f"Usuario_{numero_persona[-4:]}"
 
@@ -228,7 +226,7 @@ def webhook():
                         rifa[n]["estado"] = "ocupado"
                         rifa[n]["nombre"] = user_nombre
                         rifa[n]["telefono"] = user_phone_clean
-                        rifa[n]["enlace"] = f"https://wa.me/{user_phone_clean}"
+                        rifa[n]["enlace"] = f"wa.me/{user_phone_clean}"
 
                     del solicitudes[req_id_encontrado]
                     data_rifa["numeros"] = rifa
@@ -350,14 +348,14 @@ def webhook():
                     link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
                     link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
 
+                    # Mensaje al admin limpio, sin tarjetas de preview de WhatsApp y con el nombre como enlace clickeable directo al chat
                     txt_admin = (
                         f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                        f"👤 *Cliente:* *{nombre_usuario}*\n"
-                        f"💬 *Chat directo:* https://wa.me/{numero_persona}\n"
+                        f"👤 *Cliente:* wa.me/{numero_persona} ({nombre_usuario})\n"
                         f"🎟️ *Números:* *{nums_solicitados_txt}*\n\n"
                         f"Toca una opción para responder:\n\n"
-                        f"🟢 *[ CONFIRMAR PAGO ]*\n{link_confirmar}\n\n"
-                        f"🔴 *[ RECHAZAR PAGO ]*\n{link_rechazar}"
+                        f"🟢 *[ CONFIRMAR PAGO ]*\nwa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}\n\n"
+                        f"🔴 *[ RECHAZAR PAGO ]*\nwa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
                     )
                     
                     enviar_mensaje_evolution(WHATSAPP_ADMIN_CHAT_ID, txt_admin)
