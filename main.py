@@ -93,7 +93,8 @@ def generar_texto_lista():
             telefono_ocupante = info.get("telefono", "")
             
             if telefono_ocupante:
-                texto += f"🔴 *{num_str}*: Ocupado por ~{nombre_ocupante}~ (https://wa.me/{telefono_ocupante})\n"
+                # Nombre en azul con enlace directo al chat privado al lado del número
+                texto += f"🔴 *{num_str}*: Ocupado por [{nombre_ocupante}](https://wa.me/{telefono_ocupante})\n"
             else:
                 texto += f"🔴 *{num_str}*: Ocupado por *{nombre_ocupante}*\n"
             
@@ -158,18 +159,15 @@ def webhook():
         if not mensaje_texto:
             return "No text", 200
 
-        # Extracción segura y directa del emisor real del mensaje
+        # Extracción segura y directa del emisor real del mensaje para evitar confusiones con el admin
         key_data = data_msg.get("key", {})
         remote_jid = key_data.get("remoteJid", "")
         participant = key_data.get("participant", "")
         
         jid_crudo = participant if participant else remote_jid
-        
-        # Extraemos los números limpios del JID
         digitos_puros = re.sub(r'\D', '', jid_crudo)
         
         if len(digitos_puros) >= 8:
-            # Si viene con sufijo de LID o número largo, tomamos los dígitos correctos del usuario móvil
             if "@s.whatsapp.net" in jid_crudo or "@c.us" in jid_crudo or "@g.us" not in jid_crudo:
                 numero_persona = digitos_puros[-13:] if len(digitos_puros) >= 13 else digitos_puros
             else:
@@ -239,7 +237,7 @@ def webhook():
 
                     enviar_mensaje_evolution(remote_jid, f"✅ *Solicitud {req_id_encontrado} APROBADA.*")
 
-                    msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Participante:* *{user_nombre}*\n🎟️ *Números:* *{nums_formatted}*\n\n¡Felicidades! 🤝"
+                    msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Participante:* [{user_nombre}](https://wa.me/{user_phone_clean})\n🎟️ *Números:* *{nums_formatted}*\n\n¡Felicidades! 🤝"
                     enviar_mensaje_evolution(grupo_origen, msg_grupo, menciones=[target_chat_id])
                     
                     msg_privado = f"🎉 *¡Hola {user_nombre}!* 🎉\n\nTu pago fue verificado. Tus números (*{nums_formatted}*) ya están registrados a tu nombre."
@@ -335,7 +333,7 @@ def webhook():
 
                     nums_solicitados_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
 
-                    # Mensaje al grupo sin enlaces aislados para evitar tarjetas de vista previa (Share on WhatsApp)
+                    # Mensaje al grupo sin enlaces sueltos para evitar la tarjeta de vista previa
                     txt_grupo = (
                         f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
                         f"Hola @{numero_persona}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
@@ -346,14 +344,14 @@ def webhook():
 
                     enviar_mensaje_evolution(remote_jid, txt_grupo, menciones=[user_chat_id])
 
-                    # Mensaje al administrador con formato limpio sin saltos solitarios de enlaces
+                    # Mensaje al administrador con el nombre del usuario convertido en enlace interactivo (sin URLs sueltas)
                     txt_admin = (
                         f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                        f"👤 *Cliente:* {nombre_usuario} (wa.me/{numero_persona})\n"
+                        f"👤 *Cliente:* [{nombre_usuario}](https://wa.me/{numero_persona})\n"
                         f"🎟️ *Números:* *{nums_solicitados_txt}*\n\n"
-                        f"Toca una opción para responder:\n\n"
-                        f"🟢 *[ CONFIRMAR PAGO ]*\nEnlace directo: https://wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}\n\n"
-                        f"🔴 *[ RECHAZAR PAGO ]*\nEnlace directo: https://wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
+                        f"Para responder, haz clic en:\n"
+                        f"🟢 [CONFIRMAR PAGO](https://wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id})\n\n"
+                        f"🔴 [RECHAZAR PAGO](https://wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id})"
                     )
                     
                     enviar_mensaje_evolution(WHATSAPP_ADMIN_CHAT_ID, txt_admin)
