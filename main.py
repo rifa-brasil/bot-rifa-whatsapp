@@ -13,40 +13,6 @@ ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "5511948824359") # Tu número de adm
 
 DB_FILE = "rifa_db.json"
 
-# --- CONFIGURAR WEBHOOK AUTOMÁTICAMENTE AL INICIAR ---
-async def configurar_webhook_automatico():
-    """Configura automáticamente el webhook en Evolution API usando la URL pública de Render."""
-    url = f"{EVOLUTION_URL}/webhook/set/{INSTANCE_NAME}"
-    headers = {
-        "apikey": EVOLUTION_API_KEY,
-        "Content-Type": "application/json"
-    }
-    
-    base_url = os.environ.get("RENDER_EXTERNAL_URL", "https://bot-rifa-whatsapp.onrender.com")
-    webhook_url = f"{base_url}/webhook"
-    
-    payload = {
-        "webhook": {
-            "enabled": True,
-            "url": webhook_url,
-            "byEvents": False,
-            "events": [
-                "MESSAGES_UPSERT"
-            ]
-        }
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as resp:
-                if resp.status in [200, 201]:
-                    print(f"✅ Webhook configurado con éxito en: {webhook_url}")
-                else:
-                    body = await resp.text()
-                    print(f"⚠️ Aviso al configurar webhook ({resp.status}): {body}")
-    except Exception as e:
-        print(f"No se pudo conectar automáticamente con Evolution API: {e}")
-
 # --- CLIENTE HTTP PARA ENVIAR MENSAJES VÍA EVOLUTION API ---
 async def enviar_mensaje_whatsapp(session, to_phone, text_body, interactive_buttons=None):
     remote_jid = f"{to_phone}@s.whatsapp.net" if "@" not in str(to_phone) else to_phone
@@ -293,7 +259,7 @@ def obtener_texto_reglas(lang="es"):
             "📌 *REGLAS Y DINÁMICA DEL GRUPO (Gran Sorteo 100):*\n\n"
             "1️⃣ *Respeto:* Mantén un ambiente de respeto absoluto.\n"
             "2️⃣ *Números y Promoción:* Disponemos de 100 números (del 01 al 100).\n"
-            f"✨ *Valores para tu primera jugada:* 1 núm = {VALOR_POR_NUMERO} reales | 5 núm = {int(VALOR_POR_NUMERO * 4)} reales.\n"
+            f"✨ *Valores para tu primera jugada:* 1 núm = {VALOR_POR_NUMERO} reales | 5 núm = {int(VALOR_POR_NUMERO * 4)} reais.\n"
             f"⚠️ A partir de tu segunda jugada, cada número cuesta exactamente {VALOR_POR_NUMERO} reales.\n"
             "Envía `lista` para ver los disponibles y escribe los que deseas separados por coma (ej: *7, 14*).\n"
             "3️⃣ El sorteo se realiza cuando los 100 números estén ocupados y pagados.\n"
@@ -481,8 +447,7 @@ async def procesar_callback_btn(session, from_phone, btn_id):
 # --- FUNCIÓN PRINCIPAL ---
 async def main():
     inicializar_rifa()
-    await configurar_webhook_automatico()
-    await start_web_server()
+    await start_web_server() # Inicia directamente el servidor web en Render
 
     stop_signal = asyncio.Event()
     await stop_signal.wait()
