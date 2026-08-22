@@ -93,8 +93,7 @@ def generar_texto_lista():
             telefono_ocupante = info.get("telefono", "")
             
             if telefono_ocupante:
-                link_chat = f"wa.me/{telefono_ocupante}"
-                texto += f"🔴 *{num_str}*: Ocupado por *{nombre_ocupante}* 👉 {link_chat}\n"
+                texto += f"🔴 *{num_str}*: Ocupado por [{nombre_ocupante}](https://wa.me/{telefono_ocupante})\n"
             else:
                 texto += f"🔴 *{num_str}*: Ocupado por *{nombre_ocupante}*\n"
             
@@ -159,22 +158,22 @@ def webhook():
         if not mensaje_texto:
             return "No text", 200
 
-        # Extracción robusta del número real evitando LIDs o prefijos incorrectos
+        # Extracción mejorada para capturar el número real de WhatsApp ignorando LIDs de Meta
         key_data = data_msg.get("key", {})
         remote_jid = key_data.get("remoteJid", "")
         participant = key_data.get("participant", "")
         
+        # Si viene de un grupo, el participante real está en 'participant', si es privado en 'remoteJid'
         jid_crudo = participant if participant else remote_jid
         
-        # Filtramos estrictamente para extraer números de teléfono móviles válidos (ej Brasil 55 + DDD + 8/9 dígitos)
+        # Extraemos todos los dígitos
         digitos_puros = re.sub(r'\D', '', jid_crudo)
-        if len(digitos_puros) >= 11:
-            # Tomamos los últimos 11 o 12 dígitos correspondientes al número real con DDD
-            numero_persona = digitos_puros[-11:] if len(digitos_puros) == 11 else digitos_puros[-12:]
-            # Si por capricho de whatsapp trae un DDI incorrecto largo, lo ajustamos al número brasileño estándar de tu zona si empieza por 55
-            if digitos_puros.startswith("55") and len(digitos_puros) >= 12:
-                numero_persona = digitos_puros[-13:] if len(digitos_puros) >= 13 else digitos_puros[-12:]
+        
+        # Verificamos si es un número válido (evitando los IDs largos de LID que suelen tener más de 15 dígitos)
+        if 10 <= len(digitos_puros) <= 14:
+            numero_persona = digitos_puros
         else:
+            # Si el JID trae un LID cifrado, buscamos en el objeto si hay otro campo o usamos respaldo
             numero_persona = WHATSAPP_ADMIN_PHONE
 
         user_chat_id = f"{numero_persona}@s.whatsapp.net"
@@ -226,7 +225,7 @@ def webhook():
                         rifa[n]["estado"] = "ocupado"
                         rifa[n]["nombre"] = user_nombre
                         rifa[n]["telefono"] = user_phone_clean
-                        rifa[n]["enlace"] = f"wa.me/{user_phone_clean}"
+                        rifa[n]["enlace"] = f"https://wa.me/{user_phone_clean}"
 
                     del solicitudes[req_id_encontrado]
                     data_rifa["numeros"] = rifa
@@ -348,14 +347,14 @@ def webhook():
                     link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
                     link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
 
-                    # Mensaje al admin limpio, sin tarjetas de preview de WhatsApp y con el nombre como enlace clickeable directo al chat
+                    # Mensaje al admin con el nombre del usuario convertido en enlace directo limpio (https://wa.me/...) sin tarjeta de preview
                     txt_admin = (
                         f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                        f"👤 *Cliente:* wa.me/{numero_persona} ({nombre_usuario})\n"
+                        f"👤 *Cliente:* [{nombre_usuario}](https://wa.me/{numero_persona})\n"
                         f"🎟️ *Números:* *{nums_solicitados_txt}*\n\n"
                         f"Toca una opción para responder:\n\n"
-                        f"🟢 *[ CONFIRMAR PAGO ]*\nwa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}\n\n"
-                        f"🔴 *[ RECHAZAR PAGO ]*\nwa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
+                        f"🟢 *[ CONFIRMAR PAGO ]*\nhttps://wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}\n\n"
+                        f"🔴 *[ RECHAZAR PAGO ]*\nhttps://wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
                     )
                     
                     enviar_mensaje_evolution(WHATSAPP_ADMIN_CHAT_ID, txt_admin)
