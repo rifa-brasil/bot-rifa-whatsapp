@@ -5,22 +5,49 @@ import asyncio
 from datetime import datetime
 from aiohttp import web
 
-# --- CONFIGURACIÓN DE EVOLUTION API ---
-EVOLUTION_URL = os.environ.get("EVOLUTION_URL", "").rstrip("/")  # Ej: https://tu-api.onrender.com
-EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY")          # Tu Global API Key
-INSTANCE_NAME = os.environ.get("INSTANCE_NAME")                  # Nombre de la instancia en Evolution
-ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "5562999999999")     # Número del admin con código de país sin '+'
+# --- TUS CREDENCIALES DE EVOLUTION API ---
+EVOLUTION_URL = "https://mi-whatsapp-api-pobo.onrender.com"
+EVOLUTION_API_KEY = "55725d7c0b0fb17cb5e6564edac38c1f"
+INSTANCE_NAME = "mi-bot"
+ADMIN_PHONE = "5511948824359"
 
 DB_FILE = "rifa_db.json"
 
-# --- CLIENTE HTTP GLOBAL PARA ENVIAR MENSAJES VÍA EVOLUTION API ---
-async def enviar_mensaje_whatsapp(session, to_phone, text_body, interactive_buttons=None):
-    """Envía un mensaje de texto o con botones interactivos a través de Evolution API."""
-    if not EVOLUTION_URL or not EVOLUTION_API_KEY or not INSTANCE_NAME:
-        print("Error: Faltan variables de entorno de Evolution API (EVOLUTION_URL, EVOLUTION_API_KEY, INSTANCE_NAME).")
-        return
+# --- CONFIGURAR WEBHOOK AUTOMÁTICAMENTE AL INICIAR ---
+async def configurar_webhook_automatico():
+    """Configura automáticamente el webhook en Evolution API para no tener que buscarlo en menús."""
+    url = f"{EVOLUTION_URL}/webhook/set/{INSTANCE_NAME}"
+    headers = {
+        "apikey": EVOLUTION_API_KEY,
+        "Content-Type": "application/json"
+    }
+    # Obtenemos la URL pública de este mismo servicio en Render de forma automática o usando la fija
+    webhook_url = "https://bot-rifa-whatsapp.onrender.com/webhook"
+    
+    payload = {
+        "webhook": {
+            "enabled": True,
+            "url": webhook_url,
+            "byEvents": False,
+            "events": [
+                "MESSAGES_UPSERT"
+            ]
+        }
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status in [200, 201]:
+                    print("✅ Webhook configurado automáticamente con éxito en Evolution API.")
+                else:
+                    body = await resp.text()
+                    print(f"⚠️ Aviso al configurar webhook ({resp.status}): {body}")
+    except Exception as e:
+        print(f"No se pudo conectar automáticamente con Evolution API: {e}")
 
-    # Limpiar número (asegurar formato de JID o número puro de WhatsApp)
+# --- CLIENTE HTTP GLOBAL PARA ENVIAR MENSAJES ---
+async def enviar_mensaje_whatsapp(session, to_phone, text_body, interactive_buttons=None):
     remote_jid = f"{to_phone}@s.whatsapp.net" if "@" not in str(to_phone) else to_phone
 
     headers = {
@@ -29,7 +56,6 @@ async def enviar_mensaje_whatsapp(session, to_phone, text_body, interactive_butt
     }
 
     if interactive_buttons:
-        # Envío con botones interactivos en Evolution API
         url = f"{EVOLUTION_URL}/message/sendButtons/{INSTANCE_NAME}"
         buttons_payload = [
             {"type": "reply", "displayText": btn["title"][:20], "id": btn["id"]}
@@ -43,7 +69,6 @@ async def enviar_mensaje_whatsapp(session, to_phone, text_body, interactive_butt
             "buttons": buttons_payload
         }
     else:
-        # Envío de texto plano
         url = f"{EVOLUTION_URL}/message/sendText/{INSTANCE_NAME}"
         payload = {
             "number": remote_jid,
@@ -58,40 +83,29 @@ async def enviar_mensaje_whatsapp(session, to_phone, text_body, interactive_butt
     except Exception as e:
         print(f"Excepción enviando mensaje vía Evolution API: {e}")
 
-# --- SERVIDOR WEB Y WEBHOOK PARA RENDER ---
+# --- SERVIDOR WEB Y WEBHOOK ---
 async def handle_post_webhook(request):
-    """Recepción de mensajes y eventos interactivos enviados por Evolution API."""
     try:
         body = await request.json()
-        print(f"Webhook recibido: {body.get('event')}")
-
-        # Evolution API suele enviar el evento 'messages.upsert'
         event_type = body.get("event")
         
         if event_type == "messages.upsert" or "data" in body:
             data_payload = body.get("data", {})
-            
-            # Extraer información del mensaje desde la estructura de Evolution
             key = data_payload.get("key", {})
             if key.get("fromMe", False):
                 return web.Response(text="OK", status=200)
 
             remote_jid = key.get("remoteJid", "")
-            # Extraer el número de teléfono limpio desde el JID (ej: 556299999999@s.whatsapp.net -> 556299999999)
             from_phone = remote_jid.split("@")[0] if "@" in remote_jid else remote_jid
-
             message_data = data_payload.get("message", {})
             
             texto_mensaje = ""
             btn_id_pulsado = None
 
-            # Detectar mensaje de texto plano
             if "conversation" in message_data:
                 texto_mensaje = message_data.get("conversation", "").strip()
             elif "extendedTextMessage" in message_data:
                 texto_mensaje = message_data.get("extendedTextMessage", {}).get("text", "").strip()
-            
-            # Detectar respuesta a botón interactivo en Evolution API
             elif "buttonsResponseMessage" in message_data:
                 btn_id_pulsado = message_data.get("buttonsResponseMessage", {}).get("selectedButtonId")
             elif "templateButtonReplyMessage" in message_data:
@@ -114,7 +128,7 @@ async def handle_web(request):
 async def start_web_server():
     app = web.Application()
     app.router.add_get("/", handle_web)
-    app.router.add_post("/webhook", handle_post_webhook)  # Endpoint único donde Evolution mandará los eventos
+    app.router.add_post("/webhook", handle_post_webhook)
     
     runner = web.AppRunner(app)
     await runner.setup()
@@ -122,7 +136,7 @@ async def start_web_server():
     port = int(os.environ.get("PORT", 10000))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
-    print(f"🌐 Servidor web y Webhook de Evolution corriendo en el puerto {port}")
+    print(f"🌐 Servidor web y Webhook corriendo en el puerto {port}")
 
 # --- GESTIÓN DE BASE DE DATOS JSON ---
 def inicializar_rifa():
@@ -280,7 +294,6 @@ async def procesar_mensaje_entrante(session, from_phone, mensaje_texto):
     idiomas = data_rifa.get("idiomas_usuarios", {})
     lang_usuario = idiomas.get(from_phone, "es")
 
-    # Comandos de Administrador
     if from_phone == ADMIN_PHONE:
         if comando.startswith("/bloquear"):
             data_rifa["estado_rifa"] = "bloqueada"
@@ -312,7 +325,6 @@ async def procesar_mensaje_entrante(session, from_phone, mensaje_texto):
                         await enviar_mensaje_whatsapp(session, info_num.get("user_id"), msg_ganador)
                     return
 
-    # Comandos generales
     if comando in ["hola", "buenas", "lista", "inicio", "rifa", "sorteo", "reglas"]:
         if comando == "reglas":
             texto_resp = obtener_texto_reglas(lang_usuario)
@@ -322,7 +334,6 @@ async def procesar_mensaje_entrante(session, from_phone, mensaje_texto):
         await enviar_mensaje_whatsapp(session, from_phone, texto_resp, interactive_buttons=generar_teclado_idioma())
         return
 
-    # Selección de números separados por coma
     partes = [p.strip() for p in mensaje_texto.split(",")]
     es_lista_numeros = all(p.isdigit() for p in partes) if partes else False
 
@@ -373,7 +384,6 @@ async def procesar_mensaje_entrante(session, from_phone, mensaje_texto):
             )
             await enviar_mensaje_whatsapp(session, from_phone, msg_usuario)
 
-            # Notificar al Administrador con botones interactivos de aprobación/rechazo
             botones_admin = [
                 {"id": f"conf_{req_id}", "title": "🟢 Aprobar"},
                 {"id": f"rech_{req_id}", "title": "🔴 Rechazar"}
@@ -390,7 +400,6 @@ async def procesar_mensaje_entrante(session, from_phone, mensaje_texto):
 async def procesar_callback_btn(session, from_phone, btn_id):
     data_rifa = obtener_data_completa()
 
-    # Selección de Idioma
     if btn_id.startswith("lang_"):
         lang = btn_id.split("_")[1]
         if "idiomas_usuarios" not in data_rifa:
@@ -402,7 +411,6 @@ async def procesar_callback_btn(session, from_phone, btn_id):
         await enviar_mensaje_whatsapp(session, from_phone, texto_resp, interactive_buttons=generar_teclado_idioma())
         return
 
-    # Acciones del Administrador (Aprobar / Rechazar)
     if from_phone != ADMIN_PHONE:
         return
 
@@ -453,6 +461,8 @@ async def procesar_callback_btn(session, from_phone, btn_id):
 # --- FUNCIÓN PRINCIPAL ---
 async def main():
     inicializar_rifa()
+    # Configura el webhook automáticamente en cuanto enciende el bot
+    await configurar_webhook_automatico()
     await start_web_server()
 
     stop_signal = asyncio.Event()
