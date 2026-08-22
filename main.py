@@ -89,18 +89,13 @@ def generar_texto_lista():
         elif estado == "pendiente":
             texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
-            if info.get("enlace"):
-                link = info["enlace"]
-            elif info.get("telefono"):
-                tel_limpio = info["telefono"].replace("+", "").strip()
-                link = f"wa.me/{tel_limpio}"
-            else:
-                link = ""
+            nombre_ocupante = info.get("nombre", "Participante")
+            link = info.get("enlace", "")
 
             if link:
-                texto += f"🔴 *{num_str}*: Ocupado por {info['nombre']} 👉 {link}\n"
+                texto += f"🔴 *{num_str}*: Ocupado por {nombre_ocupante} 👉 {link}\n"
             else:
-                texto += f"🔴 *{num_str}*: Ocupado por {info['nombre']}\n"
+                texto += f"🔴 *{num_str}*: Ocupado por {nombre_ocupante}\n"
             
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     if data.get("estado_rifa") == "finalizada":
@@ -168,35 +163,26 @@ def webhook():
         if "lista oficial de la rifa" in comando or "participantes convocados" in comando or "tenemos un ganador" in comando:
             return "Ignored loop", 200
 
-        # --- EXTRACCIÓN ROBUSTA Y PRECISA DEL REMITENTE Y NÚMERO ---
+        # --- EXTRACCIÓN LIMPIA DEL REMITENTE ---
         key_data = data_msg.get("key", {})
         remote_jid = key_data.get("remoteJid", "")
         participant = key_data.get("participant", "")
-        sender_alt = data_msg.get("sender", "")
-
-        # Determinamos de dónde sacar el JID real del usuario que escribe
-        candidato_jid = participant if participant else (sender_alt if sender_alt else remote_jid)
         
-        # Si viene un JID completo de WhatsApp (ej: 5511948824359@s.whatsapp.net o con sufijos lid)
-        match_jid = re.search(r'(\d{10,15})@', candidato_jid)
+        jid_real = participant if participant else remote_jid
+        
+        # Extraemos los dígitos del número para armar el chat_id interno de WhatsApp de forma infalible
+        match_jid = re.search(r'(\d{10,15})@', jid_real)
         if match_jid:
             numero_persona = match_jid.group(1)
         else:
-            # Si no tiene @s.whatsapp.net, buscamos cualquier bloque de 10 a 15 dígitos que parezca un número telefónico real
-            digitos_todos = re.sub(r'\D', '', candidato_jid)
-            if len(digitos_todos) >= 10:
-                # Tomamos los últimos 13 dígitos o el bloque que corresponda a celular
-                numero_persona = digitos_todos[-11:] if len(digitos_todos) >= 11 else digitos_todos
-            else:
-                # Si por alguna razón extraña llega el remote_jid del grupo puro, intentamos extraer del pushName o usar admin de respaldo
-                numero_persona = WHATSAPP_ADMIN_PHONE
+            digitos = re.sub(r'\D', '', jid_real)
+            numero_persona = digitos[-11:] if len(digitos) >= 11 else (digitos if len(digitos) >= 8 else WHATSAPP_ADMIN_PHONE)
 
-        # Validamos que el número tenga longitud lógica de teléfono (ej Brasil/Cuba/otros >= 10 dígitos)
-        if len(numero_persona) < 8:
-            numero_persona = WHATSAPP_ADMIN_PHONE
+        user_chat_id = f"{numero_persona}@s.whatsapp.net"
 
+        # Nombre real registrado en WhatsApp (pushName)
         push_name = data_msg.get("pushName", "")
-        nombre_usuario = push_name.strip() if push_name else f"+{numero_persona}"
+        nombre_usuario = push_name.strip() if push_name else f"Usuario_{numero_persona[-4:]}"
         # -------------------------------------------------------------
 
         data_rifa = obtener_data_completa()
@@ -231,20 +217,20 @@ def webhook():
             if req_id_encontrado:
                 sol = solicitudes[req_id_encontrado]
                 user_nombre = sol["nombre"]
-                user_phone = sol["telefono"]
+                user_phone_clean = sol["telefono_limpio"]
                 user_nums = sol["numeros"]
                 grupo_origen = sol["grupo_id"]
+                target_chat_id = sol["chat_id"]
 
                 nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
-                numero_limpio = re.sub(r'\D', '', user_phone)
-                user_chat_id = f"{numero_limpio}@s.whatsapp.net"
 
                 if accion == "confirmar":
                     for n in user_nums:
                         rifa[n]["estado"] = "ocupado"
                         rifa[n]["nombre"] = user_nombre
-                        rifa[n]["telefono"] = user_phone
-                        rifa[n]["enlace"] = f"wa.me/{numero_limpio}"
+                        rifa[n]["telefono"] = user_phone_clean
+                        # Guardamos un enlace web o mención directa limpia
+                        rifa[n]["enlace"] = f"wa.me/{user_phone_clean}"
 
                     del solicitudes[req_id_encontrado]
                     data_rifa["numeros"] = rifa
@@ -256,15 +242,15 @@ def webhook():
 
                     guardar_data_completa(data_rifa)
 
-                    enviar_mensaje_evolution(remote_jid, f"✅ *Solicitud {req_id_encontrado} APROBADA.* Los números ({nums_formatted}) fueron asignados exitosamente a {user_nombre}.")
+                    enviar_mensaje_evolution(remote_jid, f"✅ *Solicitud {req_id_encontrado} APROBADA.* Números ({nums_formatted}) asignados a {user_nombre}.")
 
-                    # Mensaje al grupo con mención azul interactiva
-                    msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Usuario:* @{numero_limpio} (+{numero_limpio})\n🎟️ *Números asignados:* *{nums_formatted}*\n\n¡Gracias por tu compra y mucha suerte! 🤝"
-                    enviar_mensaje_evolution(grupo_origen, msg_grupo, menciones=[user_chat_id])
+                    # Mensaje al grupo mencionando al usuario por su nombre con enlace interactivo
+                    msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Participante:* @{user_phone_clean}\n🎟️ *Números asignados:* *{nums_formatted}*\n\n¡Gracias por tu compra y mucha suerte! 🤝"
+                    enviar_mensaje_evolution(grupo_origen, msg_grupo, menciones=[target_chat_id])
                     
-                    # Mensaje privado al usuario
-                    msg_privado = f"🎉 *¡Hola {user_nombre}!* 🎉\n\nTe confirmo que tu pago ha sido verificado con éxito. Tus números (*{nums_formatted}*) ya están registrados oficialmente a tu nombre en el grupo de la rifa.\n\n¡Mucha suerte! 🍀"
-                    enviar_mensaje_evolution(user_chat_id, msg_privado)
+                    # Mensaje privado
+                    msg_privado = f"🎉 *¡Hola {user_nombre}!* 🎉\n\nTe confirmo que tu pago ha sido verificado con éxito. Tus números (*{nums_formatted}*) ya están registrados oficialmente a tu nombre.\n\n¡Mucha suerte! 🍀"
+                    enviar_mensaje_evolution(target_chat_id, msg_privado)
 
                 elif accion == "rechazar":
                     for n in user_nums:
@@ -275,13 +261,13 @@ def webhook():
                     data_rifa["solicitudes_pendientes"] = solicitudes
                     guardar_data_completa(data_rifa)
 
-                    enviar_mensaje_evolution(remote_jid, f"❌ *Solicitud {req_id_encontrado} RECHAZADA.* Los números ({nums_formatted}) vuelven a estar disponibles.")
+                    enviar_mensaje_evolution(remote_jid, f"❌ *Solicitud {req_id_encontrado} RECHAZADA.* Los números vuelven a estar disponibles.")
                     
-                    msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola @{numero_limpio}, tu solicitud para el/los número(s) *{nums_formatted}* fue rechazada. Los números vuelven a estar 🟢 *Disponibles* para los demás participantes."
-                    enviar_mensaje_evolution(grupo_origen, msg_grupo, menciones=[user_chat_id])
+                    msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola @{user_phone_clean}, tu solicitud para el/los número(s) *{nums_formatted}* fue rechazada."
+                    enviar_mensaje_evolution(grupo_origen, msg_grupo, menciones=[target_chat_id])
 
             else:
-                enviar_mensaje_evolution(remote_jid, f"⚠️ No se encontró la solicitud ID: `{req_id_input}` o ya fue procesada.")
+                enviar_mensaje_evolution(remote_jid, f"⚠️ No se encontró la solicitud ID: `{req_id_input}`.")
             return "OK", 200
 
         elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
@@ -300,7 +286,7 @@ def webhook():
 
             if es_lista_numeros:
                 if estado_actual_rifa == "finalizada":
-                    respuesta = "🔒 *Lo sentimos, el sistema está cerrado.* El sorteo ya concluyó o está congelado."
+                    respuesta = "🔒 *Lo sentimos, el sistema está cerrado.*"
                     enviar_mensaje_evolution(remote_jid, respuesta)
                     return "OK", 200
 
@@ -326,9 +312,9 @@ def webhook():
                 if ocupados:
                     mensajes_conflicto.append(f"🔴 El/los número(s) {', '.join(ocupados)} ya está(n) *OCUPADO(S)*.")
                 if pendientes:
-                    mensajes_conflicto.append(f"🟡 El/los número(s) {', '.join(pendientes)} está(n) *EN PROCESO DE VERIFICACIÓN DE PAGO* por otro participante.")
+                    mensajes_conflicto.append(f"🟡 El/los número(s) {', '.join(pendientes)} está(n) *EN PROCESO*.")
                 if invalidos:
-                    mensajes_conflicto.append(f"⚠️ El/los número(s) {', '.join(invalidos)} está(n) fuera del rango (1 al 100).")
+                    mensajes_conflicto.append(f"⚠️ El/los número(s) {', '.join(invalidos)} fuera de rango.")
 
                 if mensajes_conflicto and not validos_para_reservar:
                     respuesta = f"Hola {nombre_usuario}:\n" + "\n".join(mensajes_conflicto)
@@ -344,7 +330,8 @@ def webhook():
 
                     solicitudes[req_id] = {
                         "nombre": nombre_usuario,
-                        "telefono": f"+{numero_persona}",
+                        "telefono_limpio": numero_persona,
+                        "chat_id": user_chat_id,
                         "numeros": validos_para_reservar,
                         "grupo_id": remote_jid if "@g.us" in remote_jid else GRUPO_CHAT_ID_RESPALDO
                     }
@@ -355,26 +342,25 @@ def webhook():
 
                     nums_solicitados_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
 
-                    # Mensaje de solicitud al grupo con mención azul
+                    # Mención en el grupo con el nombre / teléfono limpio interactivo
                     txt_grupo = (
                         f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
                         f"Hola @{numero_persona}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
-                        f"🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu transferencia."
+                        f"🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu pago."
                     )
                     if mensajes_conflicto:
                         txt_grupo += "\n\n📌 *Nota:* " + " \n".join(mensajes_conflicto)
 
-                    user_chat_id_temp = f"{numero_persona}@s.whatsapp.net"
-                    enviar_mensaje_evolution(remote_jid, txt_grupo, menciones=[user_chat_id_temp])
+                    enviar_mensaje_evolution(remote_jid, txt_grupo, menciones=[user_chat_id])
 
                     link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
                     link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
 
-                    # Mensaje de notificación al administrador
+                    # Notificación al administrador mostrando el nombre de usuario de WhatsApp
                     txt_admin = (
                         f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                         f"👤 *Cliente:* {nombre_usuario}\n"
-                        f"📱 *Teléfono:* +{numero_persona} (wa.me/{numero_persona})\n"
+                        f"💬 *Chat directo:* wa.me/{numero_persona}\n"
                         f"🎟️ *Números:* *{nums_solicitados_txt}*\n\n"
                         f"-----------------------------------\n"
                         f"Toca una opción para responder:\n\n"
