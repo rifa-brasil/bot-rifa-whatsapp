@@ -8,9 +8,9 @@ app = Flask(__name__)
 
 # --- CONFIGURACIÓN DE CREDENCIALES DE WHATSAPP (EVOLUTION API) ---
 EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL", "https://mi-whatsapp-api-pobo.onrender.com")
-EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY", "56349C29-49EE-4045-94AD-9746CB0FA280")
+EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY", "55725d7c0b0fb17cb5e6564edac38c1f")
 INSTANCE_NAME = os.environ.get("INSTANCE_NAME", "mi-bot")
-ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "5562999999999")  # Número del admin sin '+'
+ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "5511948824359") 
 
 DB_FILE = "rifa_db.json"
 VALOR_POR_NUMERO = 10
