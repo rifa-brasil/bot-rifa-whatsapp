@@ -5,7 +5,7 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Configuración de Evolution API con tus datos reales
+# Configuración de Evolution API
 EVOLUTION_API_URL = os.getenv("EVOLUTION_API_URL", "https://mi-whatsapp-api-pobo.onrender.com")
 EVOLUTION_API_KEY = os.getenv("EVOLUTION_API_KEY", "55725d7c0b0fb17cb5e6564edac38c1f")
 INSTANCE_NAME = os.getenv("INSTANCE_NAME", "mi-bot")
@@ -13,14 +13,24 @@ INSTANCE_NAME = os.getenv("INSTANCE_NAME", "mi-bot")
 DB_FILE = "rifa_db.json"
 
 def load_db():
-    """Carga la base de datos local de la rifa."""
+    """Carga la base de datos local y asegura la estructura de 1 a 100."""
     if not os.path.exists(DB_FILE):
-        return {"participantes": [], "numeros_vendidos": []}
+        db_initial = {
+            "numeros": {str(i): {"estado": "disponible", "comprador": None} for i in range(1, 101)}
+        }
+        save_db(db_initial)
+        return db_initial
     try:
         with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            # Asegurar que existan del 1 al 100 por si acaso
+            if "numeros" not in data:
+                data["numeros"] = {str(i): {"estado": "disponible", "comprador": None} for i in range(1, 101)}
+            return data
     except Exception:
-        return {"participantes": [], "numeros_vendidos": []}
+        return {
+            "numeros": {str(i): {"estado": "disponible", "comprador": None} for i in range(1, 101)}
+        }
 
 def save_db(data):
     """Guarda la base de datos local."""
@@ -47,11 +57,10 @@ def send_whatsapp_message(number, text):
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Bot de Rifa con Evolution API activo y funcionando correctamente.", 200
+    return "Bot de Rifa (1-100) con Evolution API activo.", 200
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Endpoint que recibe los eventos y mensajes entrantes desde Evolution API."""
     data = request.json
     print("Webhook recibido:", json.dumps(data, indent=2))
 
@@ -60,33 +69,87 @@ def webhook():
         if event == "messages.upsert":
             message_data = data.get("data", {})
             
-            # Evitar bucles respondiendo a mensajes propios
             if message_data.get("key", {}).get("fromMe", False):
                 return jsonify({"status": "ignored_from_me"}), 200
 
             remote_jid = message_data.get("key", {}).get("remoteJid", "")
             phone_number = remote_jid.split("@")[0]
             
+            # Obtener nombre del remitente si viene en el payload
+            push_name = message_data.get("pushName", "Participante")
+
             message_content = message_data.get("message", {})
             text = (
                 message_content.get("conversation") or
                 message_content.get("extendedTextMessage", {}).get("text") or ""
-            ).strip().lower()
+            ).strip()
 
             if not text:
                 return jsonify({"status": "no_text_found"}), 200
 
+            text_lower = text.lower()
             db = load_db()
 
-            if text.startswith("/estado") or text == "estado":
-                total = len(db.get("numeros_vendidos", []))
-                send_whatsapp_message(phone_number, f"📊 *Estado de la Rifa*\n\nNúmeros ocupados hasta el momento: {total}.")
+            # Comando: lista -> Muestra del 1 al 100 indicando libres y ocupados
+            if text_lower == "lista" or text_lower == "/lista":
+                msg_lines = ["📋 *LISTA DE NÚMEROS DE LA RIFA (1-100)*\n"]
+                for i in range(1, 101):
+                    num_str = str(i)
+                    info = db["numeros"].get(num_str, {"estado": "disponible"})
+                    if info["estado"] == "ocupado":
+                        comprador = info.get("comprador", "Ocupado")
+                        msg_lines.append(f"❌ {num_str}: <s>{comprador}</s> (Ocupado)")
+                    else:
+                        msg_lines.append(f"✅ {num_str}: Disponible")
+                
+                # Dividir el mensaje si es muy largo para WhatsApp (máximo 4000 caracteres aprox)
+                full_text = "\n".join(msg_lines)
+                send_whatsapp_message(phone_number, full_text)
 
-            elif text.startswith("/comprar") or text == "comprar":
-                send_whatsapp_message(phone_number, "🎟️ Para registrar tu número o participar, por favor indícate escribiendo el número que deseas seguido de tu nombre.")
+            # Comando para comprar: ej. "5, 12, 45" o "jugar 5,12"
+            elif text_lower.startswith("jugar") or "," in text or text.isdigit():
+                # Limpiar texto para extraer solo los números separados por coma
+                clean_text = text_lower.replace("jugar", "").replace("comprar", "").strip()
+                
+                # Extraer números separados por coma
+                parts = [p.strip() for p in clean_text.split(",") if p.strip().isdigit()]
+                
+                if not parts:
+                    send_whatsapp_message(phone_number, "⚠️ Formato no reconocido. Para apartar números, envíalos separados por coma (Ejemplo: *5, 12, 25*).")
+                    return jsonify({"status": "bad_format"}), 200
+
+                ocupados_intentados = []
+                exitosos = []
+
+                for p in parts:
+                    if p in db["numeros"]:
+                        if db["numeros"][p]["estado"] == "disponible":
+                            db["numeros"][p]["estado"] = "ocupado"
+                            db["numeros"][p]["comprador"] = push_name
+                            exitosos.append(p)
+                        else:
+                            ocupados_intentados.append(p)
+
+                save_db(db)
+
+                # Construir respuesta
+                respuesta = ""
+                if exitosos:
+                    respuesta += f"🎉 ¡Listo *{push_name}*! Has apartado con éxito los números: *{', '.join(exitosos)}*.\n"
+                if ocupados_intentados:
+                    respuesta += f"⚠️ Los siguientes números ya estaban ocupados: *{', '.join(ocupados_intentados)}*."
+                
+                if not respuesta:
+                    respuesta = "⚠️ Los números seleccionados ya no están disponibles."
+
+                send_whatsapp_message(phone_number, respuesta)
 
             else:
-                send_whatsapp_message(phone_number, "¡Hola! Bienvenido al sistema de rifas. Escribe *estado* para ver los números o *comprar* para participar.")
+                send_whatsapp_message(phone_number, 
+                    "🤖 *Bot de Rifa Activo*\n\n"
+                    "• Escribe *lista* para ver todos los números del 1 al 100.\n"
+                    "• Escribe los números separados por coma (ej: *5, 12, 20*) para apartarlos."
+                )
 
     except Exception as e:
         print(f"Error procesando el webhook: {e}")
