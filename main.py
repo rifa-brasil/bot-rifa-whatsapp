@@ -12,10 +12,11 @@ EVOLUTION_API_URL = "https://mi-whatsapp-api-pobo.onrender.com"
 EVOLUTION_API_KEY = "55725d7c0b0fb17cb5e6564edac38c1f"
 INSTANCE_NAME = "mi-bot"
 ADMIN_PHONE = "5511948824359"  # Tu número de administrador
+BOT_PHONE = "5562993984530"   # Tu número de bot para armar los enlaces de aprobación
 PORT = int(os.environ.get("PORT", 10000))
 
 DB_FILE = "rifa_db.json"
-PRECIO_POR_NUMERO = 10.0  # Puedes ajustar el precio base por número aquí si lo deseas
+PRECIO_POR_NUMERO = 10.0  # Precio base por número (ajustable)
 
 def inicializar_rifa():
     try:
@@ -83,13 +84,10 @@ def enviar_whatsapp(numero, texto):
 
 def calcular_total_promocion(cantidad):
     """Lógica de precios y promociones según la cantidad de números"""
-    # Ejemplo configurable: Puedes ajustar tu promoción aquí
-    # Si compra más de 5 números, aplicamos un descuento o precio especial, por ejemplo
     total_sin_desc = cantidad * PRECIO_POR_NUMERO
     if cantidad >= 5:
-        # Ejemplo: 10% de descuento si lleva 5 o más
-        total_con_desc = total_sin_desc * 0.90
-        return total_con_desc, f"¡Aplicada promoción por volumen (-10%)!"
+        total_con_desc = total_sin_desc * 0.90  # 10% de descuento de ejemplo a partir de 5 números
+        return total_con_desc, "¡Aplicada promoción por volumen (-10%)!"
     return total_sin_desc, ""
 
 def generar_texto_lista():
@@ -193,7 +191,7 @@ def webhook():
                 estado = info_num.get("estado")
 
                 if estado != "ocupado":
-                    enviar_whatsapp(sender_id, f"⚠️ El número *{num_ingresado.zfill(2)}* no está ocupado (su estado es: *{estado}*).")
+                    enviar_whatsapp(sender_id, f"⚠️ El número *{num_ingresado.zfill(2)}* não está ocupado.")
                     return jsonify({"status": "success"}), 200
 
                 ganador_nombre = info_num.get("nombre")
@@ -265,10 +263,12 @@ def webhook():
                             f"¡Muchas felicidades y gracias por participar! 🤝"
                         )
 
-                        # Enviar notificación tanto al chat de origen (grupo/privado) como al privado del usuario
+                        # Enviar notificación tanto al chat de origen (grupo/privado) como obligatoriamente al privado del usuario
                         try:
                             enviar_whatsapp(chat_origen, texto_pago_confirmado)
                             if chat_origen != user_tel:
+                                enviar_whatsapp(user_tel, texto_pago_confirmado)
+                            else:
                                 enviar_whatsapp(user_tel, texto_pago_confirmado)
                         except Exception as e:
                             print(f"Error notificando aprobación: {e}")
@@ -381,16 +381,25 @@ def webhook():
                 
                 msg_cliente += f"\nPor favor, realice su transferencia y envíe su comprobante."
 
+                # Enviar al chat donde se hizo la solicitud (grupo o privado)
                 enviar_whatsapp(remote_jid, msg_cliente)
+
+                # Generar enlaces clickeables de WhatsApp (wa.me) para que el admin solo tenga que pulsar 'APROBAR' o 'RECHAZAR' en azul
+                link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
+                link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
+
+                # Enlace interactivo en formato de texto plano con enlace universal para abrir chat privado del usuario directamente
+                link_usuario_privado = f"https://wa.me/{sender_id}"
 
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                     f"👤 *Cliente:* {push_name}\n"
-                    f"📱 *Teléfono:* {sender_id}\n"
+                    f"📱 *Chat Privado del Usuario:* {link_usuario_privado}\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}*\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
-                    f"Para aprobar responde a este bot con:\n`conf_{req_id}`\n\n"
-                    f"Para rechazar responde con:\n`rech_{req_id}`"
+                    f"Haz clic para gestionar:\n\n"
+                    f"👉 *[ APROBAR ]*({link_aprobar})\n\n"
+                    f"👉 *[ RECHAZAR ]*({link_rechazar})"
                 )
                 enviar_whatsapp(ADMIN_PHONE, txt_admin)
 
