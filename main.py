@@ -1,119 +1,99 @@
 import os
 import json
-import requests
-import re
 import uuid
-from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
+import requests
 
 app = Flask(__name__)
 
-# --- CONFIGURACIÓN DE CREDENCIALES DE WHATSAPP ---
-WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")  # Token permanente o temporal de Meta Cloud API
-PHONE_NUMBER_ID = os.environ.get("PHONE_NUMBER_ID")  # ID del número de teléfono de WhatsApp Business
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN", "rifa_token_secreto")  # Token para verificar el webhook con Meta
-ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "5562999999999")  # Número del admin con código de país sin '+'
+# --- CONFIGURACIÓN DE CREDENCIALES DE WHATSAPP (EVOLUTION API) ---
+EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL", "https://mi-whatsapp-api-pobo.onrender.com")
+EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY", "56349C29-49EE-4045-94AD-9746CB0FA280")
+INSTANCE_NAME = os.environ.get("INSTANCE_NAME", "mi-bot")
+ADMIN_PHONE = os.environ.get("ADMIN_PHONE", "5562999999999")  # Número del admin sin '+'
 
 DB_FILE = "rifa_db.json"
+VALOR_POR_NUMERO = 10
 
-# --- CLIENTE HTTP GLOBAL PARA ENVIAR MENSAJES A WHATSAPP ---
-async def enviar_mensaje_whatsapp(session, to_phone, text_body, interactive_buttons=None):
-    """Envía un mensaje de texto o interactivo con botones a través de la Cloud API de WhatsApp."""
-    url = f"https://graph.facebook.com/v17.0/{PHONE_NUMBER_ID}/messages"
+# --- FUNCIÓN PARA ENVIAR MENSAJES A WHATSAPP (EVOLUTION API) ---
+def enviar_mensaje_whatsapp(destinatario_jid, texto, interactive_buttons=None):
+    """Envía un mensaje de texto o interactivo a través de Evolution API."""
+    if not destinatario_jid:
+        print("Error: Intentando enviar mensaje sin destinatario JID.")
+        return None
+    
+    # Asegurar formato de JID si es un número plano
+    if "@" not in destinatario_jid:
+        destinatario_jid = f"{destinatario_jid}@s.whatsapp.net"
+
+    url = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
     headers = {
-        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
-        "Content-Type": "application/json",
+        "apikey": EVOLUTION_API_KEY,
+        "Content-Type": "application/json"
     }
     
     payload = {
-        "messaging_product": "whatsapp",
-        "recipient_type": "individual",
-        "to": to_phone,
-        "type": "text"
+        "number": destinatario_jid,
+        "text": texto
     }
 
+    # Si se requieren botones, Evolution API los soporta mediante opciones avanzadas o texto formateado
     if interactive_buttons:
-        # WhatsApp permite hasta 3 botones interactivos de respuesta rápida
-        payload["type"] = "interactive"
-        payload["interactive"] = {
-            "type": "button",
-            "body": {"text": text_body},
-            "action": {
-                "buttons": [
-                    {"type": "reply", "reply": {"id": btn["id"], "title": btn["title"][:20]}}
-                    for btn in interactive_buttons[:3]
-                ]
-            }
-        }
-    else:
-        payload["text"] = {"body": text_body, "preview_url": False} # Mantiene enlaces limpios sin tarjetas pesadas
+        botones_texto = "\n\n" + "\n".join([f"👉 Responde con: *{btn['title']}*" for btn in interactive_buttons])
+        payload["text"] = texto + botones_texto
 
     try:
-        async with session.post(url, headers=headers, json=payload) as resp:
-            if resp.status != 200:
-                body_err = await resp.text()
-                print(f"Error al enviar mensaje WhatsApp ({resp.status}): {body_err}")
+        response = requests.post(url, json=payload, headers=headers)
+        return response.json()
     except Exception as e:
-        print(f"Excepción enviando mensaje a WhatsApp: {e}")
+        print(f"Error enviando mensaje por Evolution API: {e}")
+        return None
 
-# --- SERVIDOR WEB Y WEBHOOK PARA RENDER ---
-async def handle_get_webhook(request):
-    """Verificación del Webhook requerida por Meta."""
-    hub_mode = request.query.get("hub.mode")
-    hub_challenge = request.query.get("hub.challenge")
-    hub_verify_token = request.query.get("hub.verify_token")
+# --- RUTA WEB Y WEBHOOK PARA FLASK / RENDER ---
+@app.route("/", methods=["GET"])
+def handle_web():
+    return "Bot de Rifa WhatsApp Activo y en Línea 24/7!", 200
 
-    if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
-        print("Webhook verificado correctamente por Meta.")
-        return web.Response(text=hub_challenge, status=200)
-    return web.Response(text="Fallo de verificación de token", status=403)
-
-async def handle_post_webhook(request):
-    """Recepción de mensajes y eventos interactivos desde WhatsApp."""
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    """Recepción de mensajes y eventos desde la Evolution API."""
     try:
-        body = await request.json()
-        for entry in body.get("entry", []):
-            for change in entry.get("changes", []):
-                value = change.get("value", {})
-                messages = value.get("messages", [])
-                
-                if messages:
-                    msg = messages[0]
-                    from_phone = msg.get("from")  # Número del usuario que escribe
-                    msg_type = msg.get("type")
-                    
-                    # Instanciamos la sesión aiohttp para respuestas automáticas
-                    async with aiohttp.ClientSession() as session:
-                        if msg_type == "text":
-                            text_content = msg.get("text", {}).get("body", "").strip()
-                            await procesar_mensaje_entrante(session, from_phone, text_content)
-                        elif msg_type == "interactive":
-                            interactive_data = msg.get("interactive", {})
-                            if interactive_data.get("type") == "button_reply":
-                                btn_id = interactive_data.get("button_reply", {}).get("id")
-                                await procesar_callback_btn(session, from_phone, btn_id)
-                                
-        return web.Response(text="EVENT_RECEIVED", status=200)
+        body = request.json
+        if not body:
+            return jsonify({"status": "ignored"}), 200
+
+        event = body.get("event", "").lower()
+        if "messages.upsert" not in event:
+            return jsonify({"status": "ignored_event"}), 200
+
+        data_msg = body.get("data", {})
+        message_data = data_msg.get("message", {})
+        
+        texto_mensaje = ""
+        if "conversation" in message_data:
+            texto_mensaje = message_data["conversation"]
+        elif "extendedTextMessage" in message_data:
+            texto_mensaje = message_data["extendedTextMessage"].get("text", "")
+
+        if not texto_mensaje:
+            return jsonify({"status": "no_text"}), 200
+
+        remote_jid = data_msg.get("key", {}).get("remoteJid", "")
+        from_me = data_msg.get("key", {}).get("fromMe", False)
+        
+        if from_me or not remote_jid:
+            return jsonify({"status": "from_me_or_no_jid"}), 200
+
+        from_phone = remote_jid.split("@")[0]
+        push_name = data_msg.get("pushName", f"Usuario_{from_phone[-4:]}")
+
+        # Procesar de forma sincrónica con la misma lógica
+        procesar_mensaje_entrante(from_phone, push_name, texto_mensaje.strip())
+
+        return jsonify({"status": "processed"}), 200
     except Exception as e:
         print(f"Error procesando webhook POST: {e}")
-        return web.Response(text="OK", status=200)
-
-async def handle_web(request):
-    return web.Response(text="Bot de Rifa WhatsApp Activo y en Línea 24/7!")
-
-async def start_web_server():
-    app = web.Application()
-    app.router.add_get("/", handle_web)
-    app.router.add_get("/webhook", handle_get_webhook)
-    app.router.add_post("/webhook", handle_post_webhook)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    port = int(os.environ.get("PORT", 10000))
-    site = web.TCPSite(runner, "0.0.0.0", port)
-    await site.start()
-    print(f"🌐 Servidor web y Webhook corriendo en el puerto {port}")
+        return jsonify({"status": "error", "details": str(e)}), 500
 
 # --- GESTIÓN DE BASE DE DATOS JSON ---
 def inicializar_rifa():
@@ -160,8 +140,6 @@ def guardar_data_completa(data):
         print(f"Error al guardar JSON: {e}")
 
 # --- VALORES Y PRECIOS ---
-VALOR_POR_NUMERO = 10
-
 def calcular_premio_total():
     recaudacion_total = 100 * VALOR_POR_NUMERO
     premio = recaudacion_total * 0.55
@@ -202,8 +180,8 @@ def usuario_tiene_jugada_previa(user_id, data_completa):
 # --- GENERADORES DE TEXTO ---
 def generar_teclado_idioma():
     return [
-        {"id": "lang_es", "title": "🇪🇸 Cubano (Español)"},
-        {"id": "lang_pt", "title": "🇧🇷 Brasileiro (PT)"}
+        {"id": "lang_es", "title": "es"},
+        {"id": "lang_pt", "title": "pt"}
     ]
 
 def generar_texto_lista(lang="es"):
@@ -224,7 +202,12 @@ def generar_texto_lista(lang="es"):
             texto += f"🟡 *{num_str}*: " + ("Em verificação..." if lang == "pt" else "En verificación de pago...") + "\n"
         else:
             nombre = info.get("nombre", "Usuário")
-            texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
+            user_id = info.get("user_id", "")
+            clean_phone = user_id.split("@")[0] if user_id else ""
+            if clean_phone:
+                texto += f"🔴 *{num_str}*: Ocupado por [{nombre}](https://wa.me/{clean_phone})\n"
+            else:
+                texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
             
     texto += f"\n📊 *Resumo:* Restam {disponibles} números disponíveis." if lang == "pt" else f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     
@@ -255,7 +238,7 @@ def obtener_texto_reglas(lang="es"):
             "📌 *REGLAS Y DINÁMICA DEL GRUPO (Gran Sorteo 100):*\n\n"
             "1️⃣ *Respeto:* Mantén un ambiente de respeto absoluto.\n"
             "2️⃣ *Números y Promoción:* 100 números (del 01 al 100).\n"
-            f"• 1 núm = {VALOR_POR_NUMERO} reales | • 5 núm = {int(VALOR_POR_NUMERO * 4)} reales (Promoción 1ra jugada).\n"
+            f"• 1 núm = {VALOR_POR_NUMERO} reales | • 5 núm = {int(VALOR_POR_NUMERO * 4)} reais (Promoción 1ra jugada).\n"
             f"⚠️ A partir de tu 2da jugada, cada número cuesta exactamente {VALOR_POR_NUMERO} reales.\n"
             "Envía `lista` para ver los disponibles y escribe los que deseas separados por coma (ej: *7, 14*).\n"
             "3️⃣ El sorteo se realiza cuando los 100 números estén ocupados y pagados.\n"
@@ -265,27 +248,41 @@ def obtener_texto_reglas(lang="es"):
         )
 
 # --- PROCESADOR DE MENSAJES ---
-async def procesar_mensaje_entrante(session, from_phone, mensaje_texto):
+def procesar_mensaje_entrante(from_phone, push_name, mensaje_texto):
     comando = mensaje_texto.lower()
     data_rifa = obtener_data_completa()
     idiomas = data_rifa.get("idiomas_usuarios", {})
     lang_usuario = idiomas.get(from_phone, "es")
+
+    # Selección de Idioma por texto rápido
+    if comando in ["es", "español", "cubano"]:
+        idiomas[from_phone] = "es"
+        data_rifa["idiomas_usuarios"] = idiomas
+        guardar_data_completa(data_rifa)
+        enviar_mensaje_whatsapp(from_phone, f"✅ Idioma cambiado a Español 🇨🇺\n\n{generar_texto_lista('es')}")
+        return
+    elif comando in ["pt", "português", "brasileiro"]:
+        idiomas[from_phone] = "pt"
+        data_rifa["idiomas_usuarios"] = idiomas
+        guardar_data_completa(data_rifa)
+        enviar_mensaje_whatsapp(from_phone, f"✅ Idioma alterado para Português 🇧🇷\n\n{generar_texto_lista('pt')}")
+        return
 
     # Comandos de Administrador
     if from_phone == ADMIN_PHONE:
         if comando.startswith("/bloquear"):
             data_rifa["estado_rifa"] = "bloqueada"
             guardar_data_completa(data_rifa)
-            await enviar_mensaje_whatsapp(session, from_phone, "⛔ La rifa ha sido bloqueada temporalmente.")
+            enviar_mensaje_whatsapp(from_phone, "⛔ La rifa ha sido bloqueada temporalmente.")
             return
         elif comando.startswith("/desbloquear"):
             data_rifa["estado_rifa"] = "activa"
             guardar_data_completa(data_rifa)
-            await enviar_mensaje_whatsapp(session, from_phone, "🟢 La rifa ha sido desbloqueada.\n\n" + generar_texto_lista("es"))
+            enviar_mensaje_whatsapp(from_phone, "🟢 La rifa ha sido desbloqueada.\n\n" + generar_texto_lista("es"))
             return
         elif comando.startswith("/reset"):
             borrar_y_recrear_base_datos()
-            await enviar_mensaje_whatsapp(session, from_phone, "🔄 ¡Gran Sorteo 100 ha sido reseteado con éxito!")
+            enviar_mensaje_whatsapp(from_phone, "🔄 ¡Gran Sorteo 100 ha sido reseteado con éxito!")
             return
         elif comando.startswith("/ganador"):
             partes_cmd = comando.split()
@@ -298,19 +295,26 @@ async def procesar_mensaje_entrante(session, from_phone, mensaje_texto):
                     ganador_nombre = info_num.get("nombre")
                     premio_actual = calcular_premio_total()
                     msg_ganador = f"🎉 ¡Felicidades {ganador_nombre}! Has ganado con el número {num_str.zfill(2)} un premio de {premio_actual} reales."
-                    await enviar_mensaje_whatsapp(session, from_phone, msg_ganador)
+                    enviar_mensaje_whatsapp(from_phone, msg_ganador)
                     if info_num.get("user_id"):
-                        await enviar_mensaje_whatsapp(session, info_num.get("user_id"), msg_ganador)
+                        enviar_mensaje_whatsapp(info_num.get("user_id"), msg_ganador)
                     return
+        
+        # El administrador también puede aprobar o rechazar escribiendo por ejemplo: conf_r1234 o rech_r1234
+        if comando.startswith("conf_") or comando.startswith("rech_"):
+            procesar_accion_admin(from_phone, comando, data_rifa)
+            return
 
     # Comandos generales
     if comando in ["hola", "buenas", "lista", "inicio", "rifa", "sorteo", "reglas"]:
         if comando == "reglas":
             texto_resp = obtener_texto_reglas(lang_usuario)
         else:
-            texto_resp = f"Estado actual de Gran Sorteo 100:\n\n{generar_texto_lista(lang_usuario)}"
+            clean_phone = from_phone
+            user_mencion = f"[{push_name}](https://wa.me/{clean_phone})"
+            texto_resp = f"¡Hola {user_mencion}!\n\nEstado actual de Gran Sorteo 100:\n\n{generar_texto_lista(lang_usuario)}\n\n🌍 *¿Idioma? Escribe `es` (Español) o `pt` (Português)*"
         
-        await enviar_mensaje_whatsapp(session, from_phone, texto_resp, interactive_buttons=generar_teclado_idioma())
+        enviar_mensaje_whatsapp(from_phone, texto_resp)
         return
 
     # Selección de números separados por coma
@@ -320,7 +324,7 @@ async def procesar_mensaje_entrante(session, from_phone, mensaje_texto):
     if es_lista_numeros:
         estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
         if estado_actual_rifa in ["finalizada", "bloqueada"]:
-            await enviar_mensaje_whatsapp(session, from_phone, "⛔ Lo sentimos, la lista se encuentra cerrada o bloqueada.")
+            enviar_mensaje_whatsapp(from_phone, "⛔ Lo sentimos, la lista se encuentra cerrada o bloqueada.")
             return
 
         rifa = data_rifa["numeros"]
@@ -340,9 +344,11 @@ async def procesar_mensaje_entrante(session, from_phone, mensaje_texto):
             
             for n in validos_para_reservar:
                 rifa[n]["estado"] = "pendiente"
+                rifa[n]["nombre"] = push_name
+                rifa[n]["user_id"] = from_phone
 
             solicitudes[req_id] = {
-                "nombre": f"Usuario_{from_phone[-4:]}",
+                "nombre": push_name,
                 "user_id": from_phone,
                 "numeros": validos_para_reservar
             }
@@ -355,102 +361,79 @@ async def procesar_mensaje_entrante(session, from_phone, mensaje_texto):
             cantidad_numeros = len(validos_para_reservar)
             total_a_pagar = calcular_precio_total(cantidad_numeros, usuario_ya_tiene_compras=ya_tiene_compras)
 
+            clean_phone = from_phone
+            user_mencion = f"[{push_name}](https://wa.me/{clean_phone})"
+
             msg_usuario = (
                 f"⏳ *SOLICITUD EN PROCESO* ⏳\n\n"
-                f"Tus números (*{nums_solicitados_txt}*) están reservados temporalmente.\n"
+                f"Hola {user_mencion}, tus números (*{nums_solicitados_txt}*) están reservados temporalmente.\n"
                 f"💰 Cantidad: *{cantidad_numeros}*\n"
                 f"💵 Total a transferir: *{total_a_pagar} reales*\n\n"
                 f"Contacta al administrador para pagar."
             )
-            await enviar_mensaje_whatsapp(session, from_phone, msg_usuario)
+            enviar_mensaje_whatsapp(from_phone, msg_usuario)
 
-            # Notificar al Administrador con botones interactivos de aprobación/rechazo
-            botones_admin = [
-                {"id": f"conf_{req_id}", "title": "🟢 Aprobar"},
-                {"id": f"rech_{req_id}", "title": "🔴 Rechazar"}
-            ]
+            # Notificar al Administrador con comandos rápidos de texto para aprobar/rechazar
             msg_admin = (
-                f"📥 *NUEVA SOLICITUD* (ID: `{req_id}`)\n"
-                f"📱 *Teléfono:* {from_phone}\n"
+                f"📥 *NUEVA SOLICITUD* (ID: `{req_id}`)\n\n"
+                f"👤 *Cliente:* {user_mencion} (`{from_phone}`)\n"
                 f"🎟️ *Números:* *{nums_solicitados_txt}*\n"
-                f"💵 *Total:* *{total_a_pagar} reales*"
+                f"💵 *Total:* *{total_a_pagar} reales*\n\n"
+                f"👉 Para aprobar responde exactamente: `conf_{req_id}`\n"
+                f"👉 Para rechazar responde exactamente: `rech_{req_id}`"
             )
-            await enviar_mensaje_whatsapp(session, ADMIN_PHONE, msg_admin, interactive_buttons=botones_admin)
+            enviar_mensaje_whatsapp(ADMIN_PHONE, msg_admin)
 
-# --- PROCESADOR DE BOTONES INTERACTIVOS (CALLBACKS) ---
-async def procesar_callback_btn(session, from_phone, btn_id):
-    data_rifa = obtener_data_completa()
-
-    # Selección de Idioma
-    if btn_id.startswith("lang_"):
-        lang = btn_id.split("_")[1]
-        if "idiomas_usuarios" not in data_rifa:
-            data_rifa["idiomas_usuarios"] = {}
-        data_rifa["idiomas_usuarios"][from_phone] = lang
-        guardar_data_completa(data_rifa)
-
-        texto_resp = f"✅ Idioma actualizado.\n\n{generar_texto_lista(lang)}"
-        await enviar_mensaje_whatsapp(session, from_phone, texto_resp, interactive_buttons=generar_teclado_idioma())
-        return
-
-    # Acciones del Administrador (Aprobar / Rechazar)
-    if from_phone != ADMIN_PHONE:
-        return
-
-    accion, req_id = btn_id.split("_", 1)
-    rifa = data_rifa["numeros"]
-    solicitudes = data_rifa.get("solicitudes_pendientes", {})
-
-    if req_id not in solicitudes:
-        await enviar_mensaje_whatsapp(session, ADMIN_PHONE, f"⚠️ La solicitud `{req_id}` ya fue procesada.")
-        return
-
-    sol = solicitudes[req_id]
-    user_phone = sol["user_id"]
-    user_nums = sol["numeros"]
-    nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
-
-    if accion == "conf":
-        for n in user_nums:
-            rifa[n]["estado"] = "ocupado"
-            rifa[n]["nombre"] = f"Cliente_{user_phone[-4:]}"
-            rifa[n]["user_id"] = user_phone
-
-        del solicitudes[req_id]
-        data_rifa["numeros"] = rifa
-        data_rifa["solicitudes_pendientes"] = solicitudes
-
-        if all(rifa[str(n)]["estado"] == "ocupado" for n in range(1, 101)):
-            data_rifa["estado_rifa"] = "finalizada"
-
-        guardar_data_completa(data_rifa)
-        await enviar_mensaje_whatsapp(session, ADMIN_PHONE, f"✅ Aprobado con éxito. Números: {nums_formatted}")
-
-        msg_confirmacion = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\nTus números ({nums_formatted}) ya están oficiales. ¡Muchas felicidades y mucha suerte! 🤝"
-        await enviar_mensaje_whatsapp(session, user_phone, msg_confirmacion)
-
-    elif accion == "rech":
-        for n in user_nums:
-            rifa[n] = {"estado": "disponible", "nombre": "", "user_id": "", "username": ""}
-
-        del solicitudes[req_id]
-        data_rifa["numeros"] = rifa
-        data_rifa["solicitudes_pendientes"] = solicitudes
-        guardar_data_completa(data_rifa)
-        
-        await enviar_mensaje_whatsapp(session, ADMIN_PHONE, f"❌ Solicitud rechazada.")
-        await enviar_mensaje_whatsapp(session, user_phone, f"❌ Tu solicitud para los números *{nums_formatted}* fue rechazada.")
-
-# --- FUNCIÓN PRINCIPAL ---
-async def main():
-    inicializar_rifa()
-    await start_web_server()
-
-    stop_signal = asyncio.Event()
-    await stop_signal.wait()
-
-if __name__ == "__main__":
+def procesar_accion_admin(admin_phone, comando, data_rifa):
     try:
-        asyncio.run(main())
-    except (KeyboardInterrupt, SystemExit):
-        print("Bot detenido correctamente.")
+        accion, req_id = comando.split("_", 1)
+        rifa = data_rifa["numeros"]
+        solicitudes = data_rifa.get("solicitudes_pendientes", {})
+
+        if req_id not in solicitudes:
+            enviar_mensaje_whatsapp(admin_phone, f"⚠️ La solicitud `{req_id}` ya fue procesada o no existe.")
+            return
+
+        sol = solicitudes[req_id]
+        user_phone = sol["user_id"]
+        user_nums = sol["numeros"]
+        nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
+
+        if accion == "conf":
+            for n in user_nums:
+                rifa[n]["estado"] = "ocupado"
+                rifa[n]["nombre"] = sol["nombre"]
+                rifa[n]["user_id"] = user_phone
+
+            del solicitudes[req_id]
+            data_rifa["numeros"] = rifa
+            data_rifa["solicitudes_pendientes"] = solicitudes
+
+            if all(rifa[str(n)]["estado"] == "ocupado" for n in range(1, 101)):
+                data_rifa["estado_rifa"] = "finalizada"
+
+            guardar_data_completa(data_rifa)
+            enviar_mensaje_whatsapp(admin_phone, f"✅ Aprobado con éxito. Números: {nums_formatted}")
+
+            msg_confirmacion = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\nTus números ({nums_formatted}) ya están oficiales. ¡Muchas felicidades y mucha suerte! 🤝"
+            enviar_mensaje_whatsapp(user_phone, msg_confirmacion)
+
+        elif accion == "rech":
+            for n in user_nums:
+                rifa[n] = {"estado": "disponible", "nombre": "", "user_id": "", "username": ""}
+
+            del solicitudes[req_id]
+            data_rifa["numeros"] = rifa
+            data_rifa["solicitudes_pendientes"] = solicitudes
+            guardar_data_completa(data_rifa)
+            
+            enviar_mensaje_whatsapp(admin_phone, f"❌ Solicitud rechazada.")
+            enviar_mensaje_whatsapp(user_phone, f"❌ Tu solicitud para los números *{nums_formatted}* fue rechazada.")
+    except Exception as e:
+        print(f"Error procesando acción admin: {e}")
+
+# --- PUNTO DE ENTRADA PRINCIPAL ---
+if __name__ == "__main__":
+    inicializar_rifa()
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
