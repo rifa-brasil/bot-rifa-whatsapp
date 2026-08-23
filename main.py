@@ -71,7 +71,7 @@ def guardar_data_completa(data):
         print(f"Error al guardar JSON: {e}")
 
 def enviar_whatsapp(numero, texto, mencion_jid=None):
-    """Envía un mensaje usando Evolution API permitiendo menciones interactivas en verde"""
+    """Envía un mensaje usando Evolution API permitiendo menciones interactivas"""
     url = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
     headers = {
         "apikey": EVOLUTION_API_KEY,
@@ -208,7 +208,7 @@ def webhook():
                 num_ingresado = partes_cmd[1].strip()
                 if not num_ingresado.isdigit() or not (1 <= int(num_ingresado) <= 100):
                     enviar_whatsapp(sender_id, "⚠️ El número debe estar entre 1 y 100.")
-                    return jsonify({"status": "success"}), 200
+                    return jsonify({"status": "success"}}, 200
 
                 num_str = str(int(num_ingresado))
                 info_num = rifa.get(num_str, {})
@@ -219,12 +219,13 @@ def webhook():
                     return jsonify({"status": "success"}), 200
 
                 ganador_tel = info_num.get("user_id")
+                ganador_nombre = info_num.get("username", "Usuario")
                 num_formateado = num_str.zfill(2)
 
                 msg_anuncio = (
                     f"🏆 *¡RESULTADO OFICIAL DE GRAN SORTEO 100!* 🏆\n\n"
                     f"🎯 El Resultado de la Florida Pick 3 es el: *{num_formateado}*\n\n"
-                    f"🎉 ¡El usuario @{ganador_tel} es el ganador de este número! Muchas felicidades. 🥳"
+                    f"🎉 ¡El usuario @{ganador_nombre} es el ganador de este número! Muchas felicidades. 🥳"
                 )
                 enviar_whatsapp(remote_jid, msg_anuncio, mencion_jid=ganador_tel)
                 return jsonify({"status": "success"}), 200
@@ -260,6 +261,7 @@ def webhook():
                             rifa[n]["estado"] = "ocupado"
                             rifa[n]["nombre"] = user_nombre
                             rifa[n]["user_id"] = user_tel
+                            rifa[n]["username"] = user_nombre
 
                         del solicitudes[req_id]
                         data_rifa["numeros"] = rifa
@@ -277,11 +279,11 @@ def webhook():
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
-                        # 2. Mensaje al grupo de origen mencionando correctamente con @ y JID interactivo
+                        # 2. Mensaje al grupo de origen mencionando correctamente con @nombre y JID interactivo
                         try:
                             if chat_origen != user_tel:
                                 texto_pago_grupo = (
-                                    f"🎉 *¡Hola @{user_tel}!* 🎉\n\n"
+                                    f"🎉 *¡Hola @{user_nombre}!* 🎉\n\n"
                                     f"Tu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre."
                                 )
                                 enviar_whatsapp(chat_origen, texto_pago_grupo, mencion_jid=user_tel)
@@ -384,10 +386,10 @@ def webhook():
                 cantidad_nums = len(validos_para_reservar)
                 total_a_pagar, promo_txt = calcular_total_promocion(cantidad_nums)
 
-                # 1. Mensaje de Solicitud Recibida al grupo con @ y mención interactiva limpia
+                # 1. Mensaje de Solicitud Recibida al grupo con @nombre y mención interactiva
                 msg_cliente = (
                     f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
-                    f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
+                    f"Hola @{push_name}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
                     f"💰 *Total a transferir:* ${total_a_pagar:.2f}\n"
                 )
                 if promo_txt:
@@ -396,13 +398,13 @@ def webhook():
                 msg_cliente += f"\n🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu pago."
                 enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_id)
 
-                # 2. Mensaje para el administrador con mención interactiva limpia del cliente
+                # 2. Mensaje para el administrador con mención interactiva del nombre del cliente
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
 
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* @{sender_id}\n"
+                    f"👤 *Cliente:* @{push_name}\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
