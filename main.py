@@ -9,7 +9,6 @@ app = Flask(__name__)
 DB_FILE = "rifa_db.json"
 VALOR_POR_NUMERO = 10
 
-# Configura aquí o en tus variables de entorno de Render los datos de tu Evolution API
 EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL", "https://mi-whatsapp-api-pobo.onrender.com")
 EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY", "56349C29-49EE-4045-94AD-9746CB0FA280")
 INSTANCE_NAME = os.environ.get("INSTANCE_NAME", "mi-bot")
@@ -107,7 +106,9 @@ def usuario_tiene_jugada_previa(user_id, data_completa):
     return False
 
 def enviar_mensaje_whatsapp(destinatario_jid, texto):
-    """Envía un mensaje de texto a través de la Evolution API"""
+    if not destinatario_jid:
+        print("Error: Intentando enviar mensaje sin destinatario JID.")
+        return None
     url = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
     headers = {
         "apikey": EVOLUTION_API_KEY,
@@ -140,17 +141,23 @@ def generar_texto_lista(lang="es"):
         estado = info.get("estado", "disponible")
 
         if estado == "disponible":
-            texto += f"🟢 *{num_str}*: " + ("Disponível" if lang == "pt" else "Disponible") + "\n"
+            if lang == "pt":
+                texto += f"🟢 *{num_str}*: Disponível\n"
+            else:
+                texto += f"🟢 *{num_str}*: Disponible\n"
             disponibles += 1
         elif estado == "pendiente":
-            texto += f"🟡 *{num_str}*: " + ("Em verificação de pagamento..." if lang == "pt" else "En verificación de pago...") + "\n"
+            if lang == "pt":
+                texto += f"🟡 *{num_str}*: Em verificação de pagamento...\n"
+            else:
+                texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
             nombre = info.get("nombre", "Usuário")
             user_id = info.get("user_id", "")
             clean_phone = user_id.split("@")[0] if user_id else ""
             
             if clean_phone:
-                texto += f"🔴 *{num_str}*: Ocupado por {nombre} (wa.me/{clean_phone})\n"
+                texto += f"🔴 *{num_str}*: Ocupado por [{nombre}](https://wa.me/{clean_phone})\n"
             else:
                 texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
              
@@ -165,6 +172,25 @@ def generar_texto_lista(lang="es"):
     elif estado_actual == "bloqueada":
         texto += "\n\n⛔ *ESTADO:* " + ("Rifa temporariamente bloqueada pelo administrador." if lang == "pt" else "Rifa temporalmente bloqueada por el administrador.")
     return texto
+
+def obtener_texto_reglas(lang="es"):
+    premio_actual = calcular_premio_total()
+    if lang == "pt":
+        return (
+            "📌 *REGRAS E DINÂMICA DO GRUPO (Grande Sorteio 100):*\n\n"
+            "1️⃣ *Respeito:* Mantenha um ambiente de respeito absoluto...\n"
+            f"✨ *Valores para sua primeira jogada:* 1 núm = {VALOR_POR_NUMERO} reais...\n"
+            f"5️⃣ *Entrega do Prêmio:* {premio_actual} reais via PIX o CUP.\n"
+            "🤝 Grupo: https://chat.whatsapp.com/HEaEIKaEjksJRrWEKcIVEo"
+        )
+    else:
+        return (
+            "📌 *REGLAS Y DINÁMICA DEL GRUPO (Gran Sorteo 100):*\n\n"
+            "1️⃣ *Respeto:* Mantén un ambiente de respeto absoluto...\n"
+            f"✨ *Valores para tu primera jugada:* 1 núm = {VALOR_POR_NUMERO} reales...\n"
+            f"5️⃣ *Entrega del Premio:* {premio_actual} reales vía PIX o CUP.\n"
+            "🤝 Grupo: https://chat.whatsapp.com/HEaEIKaEjksJRrWEKcIVEo"
+        )
 
 @app.route("/", methods=["GET"])
 def index():
@@ -206,14 +232,33 @@ def webhook():
         idiomas = data_rifa.get("idiomas_usuarios", {})
         lang_usuario = idiomas.get(remote_jid, "es")
 
+        # Configuración de idioma rápida
+        if comando in ["es", "español", "cubano"]:
+            idiomas[remote_jid] = "es"
+            data_rifa["idiomas_usuarios"] = idiomas
+            guardar_data_completa(data_rifa)
+            enviar_mensaje_whatsapp(remote_jid, f"✅ Idioma cambiado a Español 🇨🇺\n\n{generar_texto_lista('es')}")
+            return jsonify({"status": "lang_changed"}), 200
+        elif comando in ["pt", "português", "brasileiro"]:
+            idiomas[remote_jid] = "pt"
+            data_rifa["idiomas_usuarios"] = idiomas
+            guardar_data_completa(data_rifa)
+            enviar_mensaje_whatsapp(remote_jid, f"✅ Idioma alterado para Português 🇧🇷\n\n{generar_texto_lista('pt')}")
+            return jsonify({"status": "lang_changed"}), 200
+
         # Comandos básicos
         if comando in ["hola", "buenas", "lista", "inicio", "rifa", "sorteo"]:
             clean_phone = remote_jid.split("@")[0]
-            respuesta = f"¡Hola {push_name}!\n\n{generar_texto_lista(lang_usuario)}"
+            user_mencion = f"[{push_name}](https://wa.me/{clean_phone})"
+            respuesta = f"¡Hola {user_mencion}!\n\nEstado actual de Gran Sorteo 100:\n\n{generar_texto_lista(lang_usuario)}\n\n🌍 *¿Idioma? Escribe `es` (Español) o `pt` (Português)*"
             enviar_mensaje_whatsapp(remote_jid, respuesta)
             return jsonify({"status": "success"}), 200
 
-        # Lógica de números (ej: 7, 14)
+        if comando in ["reglas", "regra", "regras"]:
+            enviar_mensaje_whatsapp(remote_jid, obtener_texto_reglas(lang_usuario))
+            return jsonify({"status": "success"}), 200
+
+        # Lógica de reserva de números (ej: 7, 14)
         partes = [p.strip() for p in texto_mensaje.split(",")]
         es_lista_numeros = all(p.isdigit() for p in partes) if partes else False
 
@@ -223,7 +268,8 @@ def webhook():
             estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
 
             if estado_actual_rifa in ["finalizada", "bloqueada"]:
-                enviar_mensaje_whatsapp(remote_jid, "⛔ Lo sentimos, la lista se encuentra cerrada o bloqueada en este momento.")
+                msg_bloq = "⛔ Lo sentimos, la lista se encuentra cerrada o bloqueada en este momento." if lang_usuario == "es" else "⛔ Desculpe, a lista está fechada ou bloqueada no momento."
+                enviar_mensaje_whatsapp(remote_jid, msg_bloq)
                 return jsonify({"status": "rifa_closed"}), 200
 
             validos_para_reservar = []
@@ -231,7 +277,8 @@ def webhook():
                 num_elegido = int(p)
                 if 1 <= num_elegido <= 100:
                     num_str = str(num_elegido)
-                    if rifa[num_str].get("estado") == "disponible":
+                    est = rifa[num_str].get("estado", "disponible")
+                    if est == "disponible":
                         validos_para_reservar.append(num_str)
 
             if validos_para_reservar:
@@ -240,6 +287,9 @@ def webhook():
                 
                 for n in validos_para_reservar:
                     rifa[n]["estado"] = "pendiente"
+                    # Guardamos también los datos del usuario en el número reservado
+                    rifa[n]["nombre"] = push_name
+                    rifa[n]["user_id"] = remote_jid
 
                 solicitudes[req_id] = {
                     "nombre": push_name,
@@ -251,28 +301,45 @@ def webhook():
                 data_rifa["solicitudes_pendientes"] = solicitudes
                 guardar_data_completa(data_rifa)
 
-                cantidad = len(validos_para_reservar)
-                total = calcular_precio_total(cantidad, ya_tiene_compras)
-                nums_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
+                cantidad_numeros = len(validos_para_reservar)
+                total_a_pagar = calcular_precio_total(cantidad_numeros, usuario_ya_tiene_compras=ya_tiene_compras)
+                nums_solicitados_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
                 
-                msg_usuario = (
-                    f"⏳ *SOLICITUD EN PROCESO* ⏳\n\n"
-                    f"Hola {push_name}, tus números (*{nums_txt}*) están reservados temporalmente.\n"
-                    f"💰 Cantidad: {cantidad}\n"
-                    f"💵 Total a transferir: {total} reales\n\n"
-                    f"Contacta al administrador para pagar."
-                )
+                clean_phone = remote_jid.split("@")[0]
+                user_mencion = f"[{push_name}](https://wa.me/{clean_phone})"
+
+                if lang_usuario == "pt":
+                    aviso_promocion = f"\n⚠️ *Aviso importante:* Como você já tem uma jogada anterior registrada, esta nova jogada de {cantidad_numeros} número(s) **não se aplica à promoção**.\n" if ya_tiene_compras else f"\n✨ *Primeira jogada detectada!* Tarifa promocional aplicada.\n"
+                    msg_usuario = (
+                        f"⏳ *SOLICITAÇÃO EM ANDAMENTO* ⏳\n\n"
+                        f"Olá {user_mencion}, seus números (*{nums_solicitados_txt}*) estão reservados.\n"
+                        f"{aviso_promocion}"
+                        f"💰 Quantidade: *{cantidad_numeros}*\n"
+                        f"💵 Total a transferir: *{total_a_pagar} reais*\n\n"
+                        f"Entre em contato com o administrador para pagar."
+                    )
+                else:
+                    aviso_promocion = f"\n⚠️ *Aviso importante:* Como ya tienes una jugada previa registrada, esta nueva jugada **no aplica para la promoción**.\n" if ya_tiene_compras else f"\n✨ *¡Primera jogada detectada!* Tarifa promocional aplicada.\n"
+                    msg_usuario = (
+                        f"⏳ *SOLICITUD EN PROCESO* ⏳\n\n"
+                        f"Hola {user_mencion}, tus números (*{nums_solicitados_txt}*) están reservados temporalmente.\n"
+                        f"{aviso_promocion}"
+                        f"💰 Cantidad: *{cantidad_numeros}*\n"
+                        f"💵 Total a transferir: *{total_a_pagar} reales*\n\n"
+                        f"Contacta al administrador para pagar."
+                    )
+
                 enviar_mensaje_whatsapp(remote_jid, msg_usuario)
 
-                # Notificar al administrador si está configurado
+                # Envío correcto de la notificación al Administrador
                 if ADMIN_WHATSAPP_JID:
-                    msg_admin = (
+                    txt_admin = (
                         f"📥 *NUEVA SOLICITUD* (ID: `{req_id}`)\n\n"
-                        f"👤 *Cliente:* {push_name} ({remote_jid})\n"
-                        f"🎟️ *Números:* *{nums_txt}*\n"
-                        f"💵 *Total:* *{total} reales* ({cantidad} núm.)"
+                        f"👤 *Cliente:* {user_mencion} ({remote_jid})\n"
+                        f"🎟️ *Números:* *{nums_solicitados_txt}*\n"
+                        f"💵 *Total:* *{total_a_pagar} reales* ({cantidad_numeros} núm.)"
                     )
-                    enviar_mensaje_whatsapp(ADMIN_WHATSAPP_JID, msg_admin)
+                    enviar_mensaje_whatsapp(ADMIN_WHATSAPP_JID, txt_admin)
 
         return jsonify({"status": "processed"}), 200
 
