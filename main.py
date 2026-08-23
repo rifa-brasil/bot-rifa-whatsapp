@@ -317,10 +317,18 @@ def webhook():
                         guardar_data_completa(data_rifa)
                         enviar_whatsapp(sender_id, f"❌ *Rechazado el ID {req_id}.*")
                         
+                        texto_rechazo = f"❌ Lo sentimos @{user_tel}, tu solicitud para los números *{nums_formatted}* fue rechazada. Los números vuelven a estar disponibles."
+                        
                         try:
-                            enviar_whatsapp(user_tel, f"❌ Tu solicitud para los números *{nums_formatted}* fue rechazada y liberada.")
+                            enviar_whatsapp(user_tel, texto_rechazo)
                         except Exception as e:
-                            print(f"Error notificando rechazo: {e}")
+                            print(f"Error notificando rechazo al privado: {e}")
+
+                        try:
+                            if chat_origen != user_tel:
+                                enviar_whatsapp(chat_origen, texto_rechazo, mencion_jid=jid_completo)
+                        except Exception as e:
+                            print(f"Error notificando rechazo al grupo: {e}")
 
                 return jsonify({"status": "success"}), 200
 
