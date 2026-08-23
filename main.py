@@ -12,7 +12,7 @@ EVOLUTION_API_URL = "https://mi-whatsapp-api-pobo.onrender.com"
 EVOLUTION_API_KEY = "55725d7c0b0fb17cb5e6564edac38c1f"
 INSTANCE_NAME = "mi-bot"
 ADMIN_PHONE = "5511948824359"  # Tu número de administrador
-BOT_PHONE = "5562993984530"   # Tu número de bot
+BOT_PHONE = "5562993984530"    # Tu número de bot
 PORT = int(os.environ.get("PORT", 10000))
 
 DB_FILE = "rifa_db.json"
@@ -224,9 +224,9 @@ def webhook():
                 msg_anuncio = (
                     f"🏆 *¡RESULTADO OFICIAL DE GRAN SORTEO 100!* 🏆\n\n"
                     f"🎯 El Resultado de la Florida Pick 3 es el: *{num_formateado}*\n\n"
-                    f"🎉 ¡El usuario *{ganador_nombre}* es el ganador de este número! Muchas felicidades. 🥳"
+                    f"🎉 ¡El usuario @{ganador_tel} es el ganador de este número! Muchas felicidades. 🥳"
                 )
-                enviar_whatsapp(remote_jid, msg_anuncio)
+                enviar_whatsapp(remote_jid, msg_anuncio, mencion_jid=ganador_tel)
 
                 if ganador_tel:
                     msg_privado = (
@@ -279,9 +279,8 @@ def webhook():
                         guardar_data_completa(data_rifa)
                         enviar_whatsapp(sender_id, f"✅ *Aprobado.* Números: {nums_formatted}")
 
-                        # Mensaje al grupo de origen con el nombre real en texto limpio (sin que aparezca el número crudo)
                         texto_pago_confirmado = (
-                            f"🎉 *¡Hola {user_nombre}!* 🎉\n\n"
+                            f"🎉 *¡Hola @{user_tel}!* 🎉\n\n"
                             f"Tu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre."
                         )
 
@@ -291,10 +290,10 @@ def webhook():
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
-                        # Enviar al grupo origen
+                        # Enviar al grupo origen con mención interactiva
                         try:
                             if chat_origen != user_tel:
-                                enviar_whatsapp(chat_origen, texto_pago_confirmado)
+                                enviar_whatsapp(chat_origen, texto_pago_confirmado, mencion_jid=user_tel)
                         except Exception as e:
                             print(f"Error enviando confirmación al grupo: {e}")
 
@@ -394,6 +393,7 @@ def webhook():
                 cantidad_nums = len(validos_para_reservar)
                 total_a_pagar, promo_txt = calcular_total_promocion(cantidad_nums)
 
+                # AQUÍ ESTÁ EL CAMBIO: Se usa @{sender_id} para que WhatsApp lo convierta en mención interactiva verde
                 msg_cliente = (
                     f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
                     f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
@@ -421,7 +421,7 @@ def webhook():
                 )
                 enviar_whatsapp(ADMIN_PHONE, txt_admin)
 
-        return jsonify({"status": "success"}), 200
+            return jsonify({"status": "success"}), 200
 
     except Exception as e:
         print(f"Error procesando webhook: {e}")
