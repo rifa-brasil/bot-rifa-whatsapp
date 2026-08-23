@@ -13,7 +13,7 @@ EVOLUTION_API_KEY = "55725d7c0b0fb17cb5e6564edac38c1f"
 INSTANCE_NAME = "mi-bot"
 ADMIN_PHONE_NUMBER = "5511948824359"
 BOT_PHONE_NUMBER = "5562993984530"
-WEBHOOK_PATH = "https://bot-rifa-whatsapp.onrender.com/webhook"
+WEBHOOK_PATH = "/webhook"
 PORT = int(os.environ.get("PORT", 10000))
 
 # Validación básica de configuración
@@ -399,7 +399,9 @@ async def handle_health(request):
 
 async def start_web_server():
     app = web.Application()
-    app.router.add_post(WEBHOOK_PATH, handle_webhook)
+    # Usamos la variable pero garantizamos el slash inicial por seguridad
+    ruta_webhook = f"/{WEBHOOK_PATH.lstrip('/')}"
+    app.router.add_post(ruta_webhook, handle_webhook)
     app.router.add_get("/", handle_health)
     runner = web.AppRunner(app)
     await runner.setup()
