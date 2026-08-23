@@ -15,6 +15,7 @@ ADMIN_PHONE = "5511948824359"  # Tu número de administrador
 PORT = int(os.environ.get("PORT", 10000))
 
 DB_FILE = "rifa_db.json"
+PRECIO_POR_NUMERO = 10.0  # Puedes ajustar el precio base por número aquí si lo deseas
 
 def inicializar_rifa():
     try:
@@ -80,6 +81,17 @@ def enviar_whatsapp(numero, texto):
         print(f"Error enviando WhatsApp a {numero}: {e}")
         return None
 
+def calcular_total_promocion(cantidad):
+    """Lógica de precios y promociones según la cantidad de números"""
+    # Ejemplo configurable: Puedes ajustar tu promoción aquí
+    # Si compra más de 5 números, aplicamos un descuento o precio especial, por ejemplo
+    total_sin_desc = cantidad * PRECIO_POR_NUMERO
+    if cantidad >= 5:
+        # Ejemplo: 10% de descuento si lleva 5 o más
+        total_con_desc = total_sin_desc * 0.90
+        return total_con_desc, f"¡Aplicada promoción por volumen (-10%)!"
+    return total_sin_desc, ""
+
 def generar_texto_lista():
     data = obtener_data_completa()
     rifa = data["numeros"]
@@ -117,24 +129,23 @@ def webhook():
         return jsonify({"status": "error"}), 400
 
     try:
-        # Detectar evento de mensaje en Evolution API (Baileys)
         event = data.get("event")
         if event != "messages.upsert":
             return jsonify({"status": "ignored"}), 200
 
         msg_data = data.get("data", {})
         
-        # Ignorar mensajes enviados por el propio bot
         if msg_data.get("key", {}).get("fromMe", False):
             return jsonify({"status": "ignored"}), 200
 
         remote_jid = msg_data.get("key", {}).get("remoteJid", "")
-        if "@g.us" in remote_jid:
+        is_group = "@g.us" in remote_jid
+        
+        if is_group:
             sender_id = msg_data.get("participant", "").split("@")[0]
         else:
             sender_id = remote_jid.split("@")[0]
 
-        # Extraer el texto del mensaje
         message_content = msg_data.get("message", {})
         mensaje_texto = ""
         if "conversation" in message_content:
@@ -156,7 +167,6 @@ def webhook():
         bloqueados = data_rifa.get("usuarios_bloqueados", [])
         estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
 
-        # Verificar si está bloqueado
         if sender_id in bloqueados and sender_id != ADMIN_PHONE:
             return jsonify({"status": "blocked"}), 200
 
@@ -193,8 +203,7 @@ def webhook():
                 msg_anuncio = (
                     f"🏆 *¡RESULTADO OFICIAL DE GRAN SORTEO 100!* 🏆\n\n"
                     f"🎯 El Resultado de la Florida Pick 3 es el: *{num_formateado}*\n\n"
-                    f"🎉 ¡El usuario *{ganador_nombre}* es el ganador de este número! Muchas felicidades. 🥳\n\n"
-                    f"Una vez que reciba la transferencia, le pedimos por favor que comparta una captura de pantalla como evidencia de transparencia."
+                    f"🎉 ¡El usuario *{ganador_nombre}* es el ganador de este número! Muchas felicidades. 🥳"
                 )
                 enviar_whatsapp(remote_jid, msg_anuncio)
 
@@ -202,31 +211,9 @@ def webhook():
                     msg_privado = (
                         f"🎉 *¡FELICIDADES {ganador_nombre}!* 🎉\n\n"
                         f"¡Has ganado Gran Sorteo 100 con tu número *{num_formateado}*! 🏆\n\n"
-                        f"Por favor, ponte en contacto con la administración para recibir tu premio y comparte tu captura de evidencia. 🤝"
+                        f"Por favor, ponte en contacto con la administración para recibir tu premio. 🤝"
                     )
                     enviar_whatsapp(ganador_tel, msg_privado)
-                return jsonify({"status": "success"}), 200
-
-            elif comando.startswith("/bloquear"):
-                partes_cmd = comando.split(" ")
-                if len(partes_cmd) > 1:
-                    target = partes_cmd[1].strip()
-                    if target not in bloqueados:
-                        bloqueados.append(target)
-                        data_rifa["usuarios_bloqueados"] = bloqueados
-                        guardar_data_completa(data_rifa)
-                        enviar_whatsapp(sender_id, f"⛔ Usuario {target} bloqueado.")
-                return jsonify({"status": "success"}), 200
-
-            elif comando.startswith("/desbloquear"):
-                partes_cmd = comando.split(" ")
-                if len(partes_cmd) > 1:
-                    target = partes_cmd[1].strip()
-                    if target in bloqueados:
-                        bloqueados.remove(target)
-                        data_rifa["usuarios_bloqueados"] = bloqueados
-                        guardar_data_completa(data_rifa)
-                        enviar_whatsapp(sender_id, f"✅ Usuario {target} desbloqueado.")
                 return jsonify({"status": "success"}), 200
 
             elif comando.startswith("/liberar"):
@@ -252,6 +239,7 @@ def webhook():
                     user_nombre = sol["nombre"]
                     user_tel = sol["user_id"]
                     user_nums = sol["numeros"]
+                    chat_origen = sol["chat_origen"]
                     nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
 
                     if accion == "conf":
@@ -274,9 +262,16 @@ def webhook():
                             f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n"
                             f"👤 *Usuario:* {user_nombre}\n"
                             f"🎟️ *Números asignados:* {nums_formatted}\n\n"
-                            f"¡Muchas felicidades! 🤝"
+                            f"¡Muchas felicidades y gracias por participar! 🤝"
                         )
-                        enviar_whatsapp(user_tel, texto_pago_confirmado)
+
+                        # Enviar notificación tanto al chat de origen (grupo/privado) como al privado del usuario
+                        try:
+                            enviar_whatsapp(chat_origen, texto_pago_confirmado)
+                            if chat_origen != user_tel:
+                                enviar_whatsapp(user_tel, texto_pago_confirmado)
+                        except Exception as e:
+                            print(f"Error notificando aprobación: {e}")
 
                     elif accion == "rech":
                         for n in user_nums:
@@ -287,7 +282,11 @@ def webhook():
                         data_rifa["solicitudes_pendientes"] = solicitudes
                         guardar_data_completa(data_rifa)
                         enviar_whatsapp(sender_id, f"❌ *Rechazado el ID {req_id}.*")
-                        enviar_whatsapp(user_tel, f"❌ Tu solicitud para los números *{nums_formatted}* fue rechazada y liberada.")
+                        
+                        try:
+                            enviar_whatsapp(user_tel, f"❌ Tu solicitud para los números *{nums_formatted}* fue rechazada y liberada.")
+                        except Exception as e:
+                            print(f"Error notificando rechazo: {e}")
 
                     return jsonify({"status": "success"}), 200
 
@@ -304,7 +303,7 @@ def webhook():
                 f"📌 *Reglas de Gran Sorteo 100:*\n"
                 f"1. Escribe `lista` para ver los números disponibles (del 01 al 100).\n"
                 f"2. Envía los números que deseas separados por comas (ejemplo: `7, 14`).\n"
-                f"3. Sigue las instrucciones de pago para asegurar tus números.\n"
+                f"3. Revisa el total calculado con promoción y haz tu transferencia.\n"
                 f"4. El ganador se define mediante la Lotería de Florida."
             )
             enviar_whatsapp(remote_jid, texto_reglas)
@@ -358,7 +357,8 @@ def webhook():
                 solicitudes[req_id] = {
                     "nombre": push_name,
                     "user_id": sender_id,
-                    "numeros": validos_para_reservar
+                    "numeros": validos_para_reservar,
+                    "chat_origen": remote_jid
                 }
 
                 data_rifa["numeros"] = rifa
@@ -366,19 +366,29 @@ def webhook():
                 guardar_data_completa(data_rifa)
 
                 nums_solicitados_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
+                cantidad_nums = len(validos_para_reservar)
+                total_a_pagar, promo_txt = calcular_total_promocion(cantidad_nums)
 
-                enviar_whatsapp(
-                    remote_jid,
+                msg_cliente = (
                     f"⏳ *SOLICITUD EN PROCESO* ⏳\n\n"
-                    f"Hola {push_name}, tus números (*{nums_solicitados_txt}*) están *reservados temporalmente*.\n\n"
-                    f"Por favor, realice la transferencia y envíe su comprobante."
+                    f"👤 *Cliente:* {push_name}\n"
+                    f"🎟️ *Números apartados:* {nums_solicitados_txt}\n"
+                    f"📊 *Cantidad:* {cantidad_nums} número(s)\n"
+                    f"💰 *Total a transferir:* ${total_a_pagar:.2f}\n"
                 )
+                if promo_txt:
+                    msg_cliente += f"🔥 *Promoción:* {promo_txt}\n"
+                
+                msg_cliente += f"\nPor favor, realice su transferencia y envíe su comprobante."
+
+                enviar_whatsapp(remote_jid, msg_cliente)
 
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                     f"👤 *Cliente:* {push_name}\n"
                     f"📱 *Teléfono:* {sender_id}\n"
-                    f"🎟️ *Números:* *{nums_solicitados_txt}*\n\n"
+                    f"🎟️ *Números:* *{nums_solicitados_txt}*\n"
+                    f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Para aprobar responde a este bot con:\n`conf_{req_id}`\n\n"
                     f"Para rechazar responde con:\n`rech_{req_id}`"
                 )
