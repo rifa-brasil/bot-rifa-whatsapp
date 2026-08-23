@@ -1,13 +1,19 @@
 import os
 import json
 import uuid
+import requests
 from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
 DB_FILE = "rifa_db.json"
 VALOR_POR_NUMERO = 10
-ADMIN_WHATSAPP_JID = os.environ.get("ADMIN_WHATSAPP_JID", "5562900000000@s.whatsapp.net") # Pon aquí tu número con @s.whatsapp.net o configúralo en variables de entorno
+
+# Configura aquí o en tus variables de entorno de Render los datos de tu Evolution API
+EVOLUTION_API_URL = os.environ.get("EVOLUTION_API_URL", "https://mi-whatsapp-api-pobo.onrender.com")
+EVOLUTION_API_KEY = os.environ.get("EVOLUTION_API_KEY", "56349C29-49EE-4045-94AD-9746CB0FA280")
+INSTANCE_NAME = os.environ.get("INSTANCE_NAME", "mi-bot")
+ADMIN_WHATSAPP_JID = os.environ.get("ADMIN_WHATSAPP_JID", "")
 
 def inicializar_rifa():
     try:
@@ -100,6 +106,24 @@ def usuario_tiene_jugada_previa(user_id, data_completa):
             return True
     return False
 
+def enviar_mensaje_whatsapp(destinatario_jid, texto):
+    """Envía un mensaje de texto a través de la Evolution API"""
+    url = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
+    headers = {
+        "apikey": EVOLUTION_API_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "number": destinatario_jid,
+        "text": texto
+    }
+    try:
+        response = requests.post(url, json=payload, headers=headers)
+        return response.json()
+    except Exception as e:
+        print(f"Error enviando mensaje por Evolution API: {e}")
+        return None
+
 def generar_texto_lista(lang="es"):
     data = obtener_data_completa()
     rifa = data["numeros"]
@@ -123,11 +147,10 @@ def generar_texto_lista(lang="es"):
         else:
             nombre = info.get("nombre", "Usuário")
             user_id = info.get("user_id", "")
-            # En WhatsApp el enlace al usuario se hace con wa.me usando los dígitos limpios del número
             clean_phone = user_id.split("@")[0] if user_id else ""
             
             if clean_phone:
-                texto += f"🔴 *{num_str}*: Ocupado por [{nombre}](https://wa.me/{clean_phone})\n"
+                texto += f"🔴 *{num_str}*: Ocupado por {nombre} (wa.me/{clean_phone})\n"
             else:
                 texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
              
@@ -143,25 +166,6 @@ def generar_texto_lista(lang="es"):
         texto += "\n\n⛔ *ESTADO:* " + ("Rifa temporariamente bloqueada pelo administrador." if lang == "pt" else "Rifa temporalmente bloqueada por el administrador.")
     return texto
 
-def obtener_texto_reglas(lang="es"):
-    premio_actual = calcular_premio_total()
-    if lang == "pt":
-        return (
-            "📌 *REGRAS E DINÂMICA DO GRUPO (Grande Sorteio 100):*\n\n"
-            "1️⃣ *Respeito:* Mantenha um ambiente de respeito absoluto...\n"
-            f"✨ *Valores para sua primeira jogada:* 1 núm = {VALOR_POR_NUMERO} reais...\n"
-            f"5️⃣ *Entrega do Prêmio:* {premio_actual} reais via PIX o CUP.\n"
-            "🤝 Grupo: https://chat.whatsapp.com/HEaEIKaEjksJRrWEKcIVEo"
-        )
-    else:
-        return (
-            "📌 *REGLAS Y DINÁMICA DEL GRUPO (Gran Sorteo 100):*\n\n"
-            "1️⃣ *Respeto:* Mantén un ambiente de respeto absoluto...\n"
-            f"✨ *Valores para tu primera jugada:* 1 núm = {VALOR_POR_NUMERO} reales...\n"
-            f"5️⃣ *Entrega del Premio:* {premio_actual} reales vía PIX o CUP.\n"
-            "🤝 Grupo: https://chat.whatsapp.com/HEaEIKaEjksJRrWEKcIVEo"
-        )
-
 @app.route("/", methods=["GET"])
 def index():
     return "Bot de Rifa WhatsApp Activo y en Línea 24/7!", 200
@@ -173,15 +177,13 @@ def webhook():
         return jsonify({"status": "ignored"}), 200
 
     try:
-        # Extracción segura de datos desde la estructura de Evolution API
-        event = data.get("event")
-        if event != "messages.upsert":
-            return jsonify({"status": "ignored"}), 200
+        event = data.get("event", "").lower()
+        if "messages.upsert" not in event:
+            return jsonify({"status": "ignored_event"}), 200
 
         data_msg = data.get("data", {})
         message_data = data_msg.get("message", {})
         
-        # Obtener texto del mensaje (soporta texto plano y extendedText)
         texto_mensaje = ""
         if "conversation" in message_data:
             texto_mensaje = message_data["conversation"]
@@ -191,11 +193,11 @@ def webhook():
         if not texto_mensaje:
             return jsonify({"status": "no_text"}), 200
 
-        remote_jid = data_msg.get("key", {}).get("remoteJid", "") # Ejemplo: 5562999999999@s.whatsapp.net
+        remote_jid = data_msg.get("key", {}).get("remoteJid", "")
         from_me = data_msg.get("key", {}).get("fromMe", False)
         
-        if from_me:
-            return jsonify({"status": "from_me_ignored"}), 200
+        if from_me or not remote_jid:
+            return jsonify({"status": "from_me_or_no_jid"}), 200
 
         push_name = data_msg.get("pushName", "Usuario")
         comando = texto_mensaje.strip().lower()
@@ -207,10 +209,9 @@ def webhook():
         # Comandos básicos
         if comando in ["hola", "buenas", "lista", "inicio", "rifa", "sorteo"]:
             clean_phone = remote_jid.split("@")[0]
-            user_mencion = f"[{push_name}](https://wa.me/{clean_phone})"
-            respuesta = f"¡Hola {user_mencion}! Estado actual:\n\n{generar_texto_lista(lang_usuario)}"
-            # Aquí mandarías la respuesta a través de tu cliente Evolution API usando requests.post(...)
-            return jsonify({"status": "success", "response": respuesta}), 200
+            respuesta = f"¡Hola {push_name}!\n\n{generar_texto_lista(lang_usuario)}"
+            enviar_mensaje_whatsapp(remote_jid, respuesta)
+            return jsonify({"status": "success"}), 200
 
         # Lógica de números (ej: 7, 14)
         partes = [p.strip() for p in texto_mensaje.split(",")]
@@ -222,6 +223,7 @@ def webhook():
             estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
 
             if estado_actual_rifa in ["finalizada", "bloqueada"]:
+                enviar_mensaje_whatsapp(remote_jid, "⛔ Lo sentimos, la lista se encuentra cerrada o bloqueada en este momento.")
                 return jsonify({"status": "rifa_closed"}), 200
 
             validos_para_reservar = []
@@ -253,11 +255,24 @@ def webhook():
                 total = calcular_precio_total(cantidad, ya_tiene_compras)
                 nums_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
                 
-                clean_phone = remote_jid.split("@")[0]
-                user_mencion = f"[{push_name}](https://wa.me/{clean_phone})"
-                
-                # Respuesta de reserva pendiente al usuario y aviso al admin
-                print(f"Reserva creada: {nums_txt} para {user_mencion} por {total} reales.")
+                msg_usuario = (
+                    f"⏳ *SOLICITUD EN PROCESO* ⏳\n\n"
+                    f"Hola {push_name}, tus números (*{nums_txt}*) están reservados temporalmente.\n"
+                    f"💰 Cantidad: {cantidad}\n"
+                    f"💵 Total a transferir: {total} reales\n\n"
+                    f"Contacta al administrador para pagar."
+                )
+                enviar_mensaje_whatsapp(remote_jid, msg_usuario)
+
+                # Notificar al administrador si está configurado
+                if ADMIN_WHATSAPP_JID:
+                    msg_admin = (
+                        f"📥 *NUEVA SOLICITUD* (ID: `{req_id}`)\n\n"
+                        f"👤 *Cliente:* {push_name} ({remote_jid})\n"
+                        f"🎟️ *Números:* *{nums_txt}*\n"
+                        f"💵 *Total:* *{total} reales* ({cantidad} núm.)"
+                    )
+                    enviar_mensaje_whatsapp(ADMIN_WHATSAPP_JID, msg_admin)
 
         return jsonify({"status": "processed"}), 200
 
