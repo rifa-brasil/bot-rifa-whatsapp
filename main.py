@@ -156,21 +156,17 @@ def webhook():
         remote_jid = msg_data.get("key", {}).get("remoteJid", "")
         is_group = "@g.us" in remote_jid
         
-        # Extracción segura y robusta del identificador del remitente
-        sender_full_jid = ""
+        # Extracción blindada y limpia del número real del usuario
         if is_group:
             sender_full_jid = msg_data.get("participant", "") or msg_data.get("key", {}).get("participant", "")
-            if not sender_full_jid and "remoteJid" in msg_data.get("key", {}):
-                # Fallback por si acaso
-                pass
         else:
             sender_full_jid = remote_jid
 
-        if "@" in sender_full_jid:
-            sender_id = sender_full_jid.split("@")[0]
-        else:
-            # Si por alguna razón vino sin sufijo, intentamos limpiar remote_jid o usar un respaldo
-            sender_id = remote_jid.split("@")[0]
+        if not sender_full_jid:
+            sender_full_jid = remote_jid
+
+        # Limpieza absoluta de sufijos y subdispositivos para obtener solo los dígitos
+        sender_id = sender_full_jid.split("@")[0].split(":")[0]
 
         message_content = msg_data.get("message", {})
         mensaje_texto = ""
@@ -290,12 +286,11 @@ def webhook():
 
                         # Enviar obligatoriamente al privado del usuario
                         try:
-                            res_priv = enviar_whatsapp(user_tel, texto_pago_confirmado)
-                            print(f"Respuesta envío privado confirmación: {res_priv}")
+                            enviar_whatsapp(user_tel, texto_pago_confirmado)
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
-                        # Enviar también al chat de origen si fue en un grupo diferente
+                        # Enviar también al chat de origen (grupo)
                         try:
                             if chat_origen != user_tel:
                                 enviar_whatsapp(chat_origen, texto_pago_confirmado)
@@ -410,7 +405,7 @@ def webhook():
 
                 enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_full_jid)
 
-                # Generar enlaces con el número de usuario asegurado
+                # Enlaces limpios con el número correcto del usuario asegurado para el admin
                 link_chat_usuario = f"https://wa.me/{sender_id}"
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
@@ -418,7 +413,7 @@ def webhook():
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                     f"👤 *Cliente:* {push_name}\n"
-                    f"💬 *Abrir chat con {push_name}:* {link_chat_usuario}\n"
+                    f"📱 *Abrir chat:* {link_chat_usuario}\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
