@@ -18,13 +18,12 @@ PORT = int(os.environ.get("PORT", 10000))
 DB_FILE = "rifa_db.json"
 
 # --- TABLA DE PRECIOS Y PROMOCIONES POR CANTIDAD ---
-# Puedes ajustar los precios de los paquetes aquí según tu preferencia:
 PRECIO_1_NUMERO = 10.0
 PRECIO_2_NUMEROS = 18.0  # Paquete de 2
 PRECIO_3_NUMEROS = 25.0  # Paquete de 3
 PRECIO_4_NUMEROS = 32.0  # Paquete de 4
 PRECIO_5_NUMEROS = 40.0  # Paquete de 5
-# A partir de 5, cada número adicional suma el valor unitario base (PRECIO_1_NUMERO)
+# A partir de 5, cada número adicional suma el valor unitario base
 
 def inicializar_rifa():
     try:
@@ -72,8 +71,8 @@ def guardar_data_completa(data):
     except Exception as e:
         print(f"Error al guardar JSON: {e}")
 
-def enviar_whatsapp(numero, texto):
-    """Envía un mensaje de texto usando Evolution API"""
+def enviar_whatsapp(numero, texto, mencion_jid=None):
+    """Envía un mensaje de texto usando Evolution API, soportando menciones opcionales"""
     url = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
     headers = {
         "apikey": EVOLUTION_API_KEY,
@@ -83,6 +82,9 @@ def enviar_whatsapp(numero, texto):
         "number": numero,
         "text": texto
     }
+    if mencion_jid:
+        payload["mentioned"] = [mencion_jid]
+
     try:
         response = requests.post(url, json=payload, headers=headers)
         return response.json()
@@ -105,7 +107,6 @@ def calcular_total_promocion(cantidad):
     elif cantidad == 5:
         return PRECIO_5_NUMEROS, "¡Promoción aplicada por 5 números (Súper Paquete)!"
     else:
-        # Si juega más de 5, se toma el precio de 5 y los restantes se suman al precio base individual
         adicionales = cantidad - 5
         total = PRECIO_5_NUMEROS + (adicionales * PRECIO_1_NUMERO)
         return total, f"¡Paquete de 5 + {adicionales} número(s) adicional(es)!"
@@ -161,8 +162,10 @@ def webhook():
         
         if is_group:
             sender_id = msg_data.get("participant", "").split("@")[0]
+            sender_full_jid = msg_data.get("participant", "")
         else:
             sender_id = remote_jid.split("@")[0]
+            sender_full_jid = remote_jid
 
         message_content = msg_data.get("message", {})
         mensaje_texto = ""
@@ -277,19 +280,17 @@ def webhook():
                         enviar_whatsapp(sender_id, f"✅ *Aprobado.* Números: {nums_formatted}")
 
                         texto_pago_confirmado = (
-                            f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n"
-                            f"👤 *Usuario:* {user_nombre}\n"
-                            f"🎟️ *Números asignados:* {nums_formatted}\n\n"
-                            f"¡Muchas felicidades y gracias por participar! 🤝"
+                            f"🎉 *¡Hola {user_nombre}!* 🎉\n\n"
+                            f"Tu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre."
                         )
 
-                        # Enviar notificación al chat de origen y obligatoriamente al privado del usuario
+                        # Enviar obligatoriamente al privado del usuario y también al chat de origen (grupo)
                         try:
-                            enviar_whatsapp(chat_origen, texto_pago_confirmado)
-                            if chat_origen != f"{user_tel}@s.whatsapp.net" and chat_origen != user_tel:
-                                enviar_whatsapp(user_tel, texto_pago_confirmado)
+                            enviar_whatsapp(user_tel, texto_pago_confirmado)
+                            if chat_origen != user_tel:
+                                enviar_whatsapp(chat_origen, texto_pago_confirmado)
                         except Exception as e:
-                            print(f"Error notificando aprobación al grupo/privado: {e}")
+                            print(f"Error enviando confirmación de pago: {e}")
 
                     elif accion == "rech":
                         for n in user_nums:
@@ -387,21 +388,20 @@ def webhook():
                 cantidad_nums = len(validos_para_reservar)
                 total_a_pagar, promo_txt = calcular_total_promocion(cantidad_nums)
 
+                # Mensaje de solicitud recibida etiquetando al usuario con mención nativa en azul
                 msg_cliente = (
-                    f"⏳ *SOLICITUD EN PROCESO* ⏳\n\n"
-                    f"👤 *Cliente:* {push_name}\n"
-                    f"🎟️ *Números apartados:* {nums_solicitados_txt}\n"
-                    f"📊 *Cantidad:* {cantidad_nums} número(s)\n"
+                    f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
+                    f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
                     f"💰 *Total a transferir:* ${total_a_pagar:.2f}\n"
                 )
                 if promo_txt:
                     msg_cliente += f"🔥 *Promoción:* {promo_txt}\n"
                 
-                msg_cliente += f"\nPor favor, realice su transferencia y envíe su comprobante."
+                msg_cliente += f"\n🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu pago."
 
-                enviar_whatsapp(remote_jid, msg_cliente)
+                enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_full_jid)
 
-                # Enlaces directos reales limpios en azul para WhatsApp
+                # Enlaces limpios para el admin con el número correctamente completado
                 link_chat_usuario = f"https://wa.me/{sender_id}"
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
