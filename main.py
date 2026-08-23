@@ -82,6 +82,9 @@ def enviar_whatsapp(numero, texto, mencion_jid=None):
         "text": texto
     }
     if mencion_jid:
+        # Aseguramos formato correcto de mention con sufijo jid si es necesario
+        if "@" not in mencion_jid:
+            mencion_jid = f"{mencion_jid}@s.whatsapp.net"
         payload["mentioned"] = [mencion_jid]
 
     try:
@@ -126,7 +129,12 @@ def generar_texto_lista():
             texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
             nombre = info.get("nombre", "Usuario")
-            texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
+            user_id = info.get("user_id", "")
+            # Mostramos el nombre con arroba utilizando el user_id real para que sea un enlace interactivo
+            if user_id:
+                texto += f"🔴 *{num_str}*: Ocupado por @{user_id} ({nombre})\n"
+            else:
+                texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
             
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     if data.get("estado_rifa") == "finalizada":
@@ -156,7 +164,7 @@ def webhook():
         remote_jid = msg_data.get("key", {}).get("remoteJid", "")
         is_group = "@g.us" in remote_jid
         
-        # Extracción blindada y limpia del número real del usuario
+        # Extracción limpia del número real del usuario
         if is_group:
             sender_full_jid = msg_data.get("participant", "") or msg_data.get("key", {}).get("participant", "")
         else:
@@ -165,7 +173,6 @@ def webhook():
         if not sender_full_jid:
             sender_full_jid = remote_jid
 
-        # Limpieza absoluta de sufijos y subdispositivos para obtener solo los dígitos
         sender_id = sender_full_jid.split("@")[0].split(":")[0]
 
         message_content = msg_data.get("message", {})
@@ -224,9 +231,9 @@ def webhook():
                 msg_anuncio = (
                     f"🏆 *¡RESULTADO OFICIAL DE GRAN SORTEO 100!* 🏆\n\n"
                     f"🎯 El Resultado de la Florida Pick 3 es el: *{num_formateado}*\n\n"
-                    f"🎉 ¡El usuario *{ganador_nombre}* es el ganador de este número! Muchas felicidades. 🥳"
+                    f"🎉 ¡El usuario @{ganador_tel} ({ganador_nombre}) es el ganador de este número! Muchas felicidades. 🥳"
                 )
-                enviar_whatsapp(remote_jid, msg_anuncio)
+                enviar_whatsapp(remote_jid, msg_anuncio, mencion_jid=ganador_tel)
 
                 if ganador_tel:
                     msg_privado = (
@@ -280,20 +287,20 @@ def webhook():
                         enviar_whatsapp(sender_id, f"✅ *Aprobado.* Números: {nums_formatted}")
 
                         texto_pago_confirmado = (
-                            f"🎉 *¡Hola {user_nombre}!* 🎉\n\n"
+                            f"🎉 *¡Hola @{user_tel} ({user_nombre})!* 🎉\n\n"
                             f"Tu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre."
                         )
 
-                        # Enviar obligatoriamente al privado del usuario
+                        # Enviar al privado del usuario
                         try:
-                            enviar_whatsapp(user_tel, texto_pago_confirmado)
+                            enviar_whatsapp(user_tel, f"🎉 *¡Hola {user_nombre}!* 🎉\n\nTu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre.")
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
-                        # Enviar también al chat de origen (grupo)
+                        # Enviar al grupo de origen con la mención interactiva funcionando
                         try:
                             if chat_origen != user_tel:
-                                enviar_whatsapp(chat_origen, texto_pago_confirmado)
+                                enviar_whatsapp(chat_origen, texto_pago_confirmado, mencion_jid=user_tel)
                         except Exception as e:
                             print(f"Error enviando confirmación al grupo: {e}")
 
@@ -405,22 +412,20 @@ def webhook():
 
                 enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_full_jid)
 
-                # Enlaces limpios con el número correcto del usuario asegurado para el admin
-                link_chat_usuario = f"https://wa.me/{sender_id}"
+                # Mensaje para el administrador con mención interactiva limpia y sin enlaces erróneos
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
 
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* {push_name}\n"
-                    f"📱 *Abrir chat:* {link_chat_usuario}\n"
+                    f"👤 *Cliente:* @{sender_id} ({push_name})\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
                     f"👉 *APROBAR:* {link_aprobar}\n\n"
                     f"👉 *RECHAZAR:* {link_rechazar}"
                 )
-                enviar_whatsapp(ADMIN_PHONE, txt_admin)
+                enviar_whatsapp(ADMIN_PHONE, txt_admin, mencion_jid=sender_full_jid)
 
         return jsonify({"status": "success"}), 200
 
