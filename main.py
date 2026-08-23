@@ -129,14 +129,13 @@ def generar_texto_lista():
         elif estado == "pendiente":
             texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
-            user_id = info.get("user_id", "")
+            nombre = info.get("nombre", "Usuario")
             jid_completo = info.get("jid_completo", "")
-            if user_id and jid_completo:
-                # Usamos el número/ID del usuario con arroba para que WhatsApp lo convierta en enlace interactivo verde
-                texto += f"🔴 *{num_str}*: Ocupado por @{user_id}\n"
+            if jid_completo:
+                # Nombre del usuario con arroba y enlazado a su JID para que sea interactivo en verde
+                texto += f"🔴 *{num_str}*: Ocupado por @{nombre}\n"
                 menciones_lista.append(jid_completo)
             else:
-                nombre = info.get("nombre", "Usuario")
                 texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
             
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
@@ -227,6 +226,7 @@ def webhook():
                     enviar_whatsapp(sender_id, f"⚠️ El número *{num_ingresado.zfill(2)}* no está ocupado.")
                     return jsonify({"status": "success"}), 200
 
+                ganador_nombre = info_num.get("nombre", "Usuario")
                 ganador_tel = info_num.get("user_id")
                 ganador_jid = info_num.get("jid_completo")
                 num_formateado = num_str.zfill(2)
@@ -234,13 +234,13 @@ def webhook():
                 msg_anuncio = (
                     f"🏆 *¡RESULTADO OFICIAL DE GRAN SORTEO 100!* 🏆\n\n"
                     f"🎯 El Resultado de la Florida Pick 3 es el: *{num_formateado}*\n\n"
-                    f"🎉 ¡El usuario @{ganador_tel} es el ganador de este número! Muchas felicidades. 🥳"
+                    f"🎉 ¡El usuario @{ganador_nombre} es el ganador de este número! Muchas felicidades. 🥳"
                 )
                 enviar_whatsapp(remote_jid, msg_anuncio, mencion_jid=ganador_jid)
 
                 if ganador_jid:
                     msg_privado = (
-                        f"🎉 *¡FELICIDADES!* 🎉\n\n"
+                        f"🎉 *¡FELICIDADES {ganador_nombre}!* 🎉\n\n"
                         f"¡Has ganado Gran Sorteo 100 con tu número *{num_formateado}*! 🏆\n\n"
                         f"Por favor, ponte en contacto con la administración para recibir tu premio. 🤝"
                     )
@@ -292,7 +292,7 @@ def webhook():
                         enviar_whatsapp(sender_id, f"✅ *Aprobado.* Números: {nums_formatted}")
 
                         texto_pago_confirmado = (
-                            f"🎉 *¡Hola @{user_tel}!* 🎉\n\n"
+                            f"🎉 *¡Hola @{user_nombre}!* 🎉\n\n"
                             f"Tu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre."
                         )
 
@@ -302,7 +302,7 @@ def webhook():
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
-                        # Enviar al grupo origen con mención interactiva verde
+                        # Enviar al grupo origen con mención interactiva verde utilizando el nombre
                         try:
                             if chat_origen != user_tel:
                                 enviar_whatsapp(chat_origen, texto_pago_confirmado, mencion_jid=jid_completo)
@@ -417,10 +417,10 @@ def webhook():
                 cantidad_nums = len(validos_para_reservar)
                 total_a_pagar, promo_txt = calcular_total_promocion(cantidad_nums)
 
-                # Usamos @sender_id para que WhatsApp pinte la mención interactiva en verde
+                # Mensaje de solicitud en proceso con el nombre del usuario y mención interactiva verde
                 msg_cliente = (
                     f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
-                    f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
+                    f"Hola @{push_name}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
                     f"💰 *Total a transferir:* ${total_a_pagar:.2f}\n"
                 )
                 if promo_txt:
@@ -430,13 +430,13 @@ def webhook():
 
                 enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_full_jid)
 
-                # Mensaje para el administrador con mención interactiva verde del cliente
+                # Mensaje para el administrador con el nombre del usuario y mención interactiva verde
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
 
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* @{sender_id}\n"
+                    f"👤 *Cliente:* @{push_name}\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
