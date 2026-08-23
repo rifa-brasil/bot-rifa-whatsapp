@@ -29,7 +29,7 @@ def inicializar_rifa():
         if not os.path.exists(DB_FILE):
             data_inicial = {
                 "estado_rifa": "activa",
-                "numeros": {str(i): {"estado": "disponible", "nombre": "", "user_id": "", "username": "", "jid_completo": ""} for i in range(1, 101)},
+                "numeros": {str(i): {"estado": "disponible", "nombre": "", "user_id": "", "jid_completo": ""} for i in range(1, 101)},
                 "solicitudes_pendientes": {},
                 "usuarios_bloqueados": []
             }
@@ -130,11 +130,10 @@ def generar_texto_lista():
             texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
             nombre = info.get("nombre", "Usuario")
-            user_id = info.get("user_id", "")
-            # Si tenemos el ID del usuario, ponemos el formato interactivo con arroba
-            if user_id:
-                texto += f"🔴 *{num_str}*: Ocupado por @{user_id}\n"
-                menciones_lista.append(f"{user_id}@s.whatsapp.net")
+            jid_completo = info.get("jid_completo", "")
+            if jid_completo:
+                texto += f"🔴 *{num_str}*: Ocupado por @{nombre}\n"
+                menciones_lista.append(jid_completo)
             else:
                 texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
             
@@ -227,23 +226,23 @@ def webhook():
                     return jsonify({"status": "success"}), 200
 
                 ganador_nombre = info_num.get("nombre")
-                ganador_tel = info_num.get("user_id")
+                ganador_jid = info_num.get("jid_completo")
                 num_formateado = num_str.zfill(2)
 
                 msg_anuncio = (
                     f"🏆 *¡RESULTADO OFICIAL DE GRAN SORTEO 100!* 🏆\n\n"
                     f"🎯 El Resultado de la Florida Pick 3 es el: *{num_formateado}*\n\n"
-                    f"🎉 ¡El usuario @{ganador_tel} es el ganador de este número! Muchas felicidades. 🥳"
+                    f"🎉 ¡El usuario @{ganador_nombre} es el ganador de este número! Muchas felicidades. 🥳"
                 )
-                enviar_whatsapp(remote_jid, msg_anuncio, mencion_jid=ganador_tel)
+                enviar_whatsapp(remote_jid, msg_anuncio, mencion_jid=ganador_jid)
 
-                if ganador_tel:
+                if ganador_jid:
                     msg_privado = (
                         f"🎉 *¡FELICIDADES {ganador_nombre}!* 🎉\n\n"
                         f"¡Has ganado Gran Sorteo 100 con tu número *{num_formateado}*! 🏆\n\n"
                         f"Por favor, ponte en contacto con la administración para recibir tu premio. 🤝"
                     )
-                    enviar_whatsapp(ganador_tel, msg_privado)
+                    enviar_whatsapp(ganador_jid.split("@")[0], msg_privado)
                 return jsonify({"status": "success"}), 200
 
             elif comando.startswith("/liberar"):
@@ -252,7 +251,7 @@ def webhook():
                     num_lib = partes_cmd[1].strip()
                     if num_lib.isdigit() and 1 <= int(num_lib) <= 100:
                         n_str = str(int(num_lib))
-                        rifa[n_str] = {"estado": "disponible", "nombre": "", "user_id": "", "username": "", "jid_completo": ""}
+                        rifa[n_str] = {"estado": "disponible", "nombre": "", "user_id": "", "jid_completo": ""}
                         data_rifa["numeros"] = rifa
                         guardar_data_completa(data_rifa)
                         enviar_whatsapp(sender_id, f"🟢 El número {n_str.zfill(2)} ha sido liberado.")
@@ -270,7 +269,7 @@ def webhook():
                     user_tel = sol["user_id"]
                     user_nums = sol["numeros"]
                     chat_origen = sol["chat_origen"]
-                    jid_completo = sol.get("jid_completo", sender_full_jid)
+                    jid_completo = sol["jid_completo"]
                     nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
 
                     if accion == "conf":
@@ -291,7 +290,7 @@ def webhook():
                         enviar_whatsapp(sender_id, f"✅ *Aprobado.* Números: {nums_formatted}")
 
                         texto_pago_confirmado = (
-                            f"🎉 *¡Hola @{user_tel}!* 🎉\n\n"
+                            f"🎉 *¡Hola @{user_nombre}!* 🎉\n\n"
                             f"Tu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre."
                         )
 
@@ -301,7 +300,7 @@ def webhook():
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
-                        # Enviar al grupo origen con mención interactiva limpia usando el JID completo
+                        # Enviar al grupo origen con mención interactiva usando el nombre del usuario
                         try:
                             if chat_origen != user_tel:
                                 enviar_whatsapp(chat_origen, texto_pago_confirmado, mencion_jid=jid_completo)
@@ -310,7 +309,7 @@ def webhook():
 
                     elif accion == "rech":
                         for n in user_nums:
-                            rifa[n] = {"estado": "disponible", "nombre": "", "user_id": "", "username": "", "jid_completo": ""}
+                            rifa[n] = {"estado": "disponible", "nombre": "", "user_id": "", "jid_completo": ""}
 
                         del solicitudes[req_id]
                         data_rifa["numeros"] = rifa
@@ -332,9 +331,7 @@ def webhook():
             if estado_actual_rifa == "activa":
                 respuesta += "\n\n👉 *¿Cómo comprar?* Envía los números que deseas separados por coma (ej: *7, 14*)."
             
-            # Si hay menciones en la lista, las pasamos para que sean interactivas también ahí
             if menciones_lista:
-                # Si enviamos múltiples menciones, Evolution API soporta una lista en "mentioned"
                 url_lista = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
                 headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
                 payload = {"number": str(remote_jid).strip(), "text": respuesta, "mentioned": menciones_lista}
@@ -420,7 +417,7 @@ def webhook():
 
                 msg_cliente = (
                     f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
-                    f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
+                    f"Hola @{push_name}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
                     f"💰 *Total a transferir:* ${total_a_pagar:.2f}\n"
                 )
                 if promo_txt:
