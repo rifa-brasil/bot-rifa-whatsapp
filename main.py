@@ -6,14 +6,14 @@ import logging
 from aiohttp import web, ClientSession
 
 # ============================================
-# CONFIGURACIÓN (TUS DATOS)
+# CONFIGURACIÓN (TUS DATOS OFICIALES)
 # ============================================
 EVOLUTION_API_URL = "https://mi-whatsapp-api-pobo.onrender.com"
 EVOLUTION_API_KEY = "55725d7c0b0fb17cb5e6564edac38c1f"
 INSTANCE_NAME = "mi-bot"
 ADMIN_PHONE_NUMBER = "5511948824359"
-BOT_PHONE_NUMBER = "5562993984530"  # Opcional, para evitar auto-respuestas
-WEBHOOK_PATH = "/webhook"
+BOT_PHONE_NUMBER = "5562993984530"
+WEBHOOK_PATH = "https://bot-rifa-whatsapp.onrender.com/webhook"
 PORT = int(os.environ.get("PORT", 10000))
 
 # Validación básica de configuración
@@ -196,7 +196,6 @@ async def handle_message(data):
 
         event_data = data.get("data", {})
         
-        # Ignorar mensajes enviados por el propio bot
         if event_data.get("key", {}).get("fromMe", False):
             return
 
@@ -228,7 +227,6 @@ async def handle_message(data):
         text_lower = message_text.lower()
         data_rifa = obtener_data_completa()
 
-        # Comandos de Administrador y Públicos
         if text_lower.startswith("/"):
             parts = message_text.split()
             command = parts[0].lower()
@@ -241,7 +239,6 @@ async def handle_message(data):
                 await send_whatsapp_message(chat_id, obtener_texto_reglas())
                 return
 
-            # Restricción de Administrador
             if sender_phone != ADMIN_PHONE_NUMBER:
                 await send_whatsapp_message(chat_id, "⛔ No estás autorizado para este comando.")
                 return
@@ -311,7 +308,6 @@ async def handle_message(data):
                 await send_whatsapp_message(chat_id, f"🔄 Rifa reseteada.\n\n{generar_texto_lista()}")
                 return
 
-        # Compra o selección de números por parte del usuario
         partes = [p.strip() for p in message_text.split(",")]
         es_lista = all(p.isdigit() for p in partes) if partes else False
 
