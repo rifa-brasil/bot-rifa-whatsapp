@@ -29,7 +29,7 @@ def inicializar_rifa():
         if not os.path.exists(DB_FILE):
             data_inicial = {
                 "estado_rifa": "activa",
-                "numeros": {str(i): {"estado": "disponible", "nombre": "", "user_id": "", "username": ""} for i in range(1, 101)},
+                "numeros": {str(i): {"estado": "disponible", "nombre": "", "user_id": "", "username": "", "jid_completo": ""} for i in range(1, 101)},
                 "solicitudes_pendientes": {},
                 "usuarios_bloqueados": []
             }
@@ -116,6 +116,8 @@ def generar_texto_lista():
     rifa = data["numeros"]
     texto = "🎟️ *LISTA OFICIAL DE GRAN SORTEO 100* 🎟️\n\n"
     disponibles = 0
+    menciones_lista = []
+    
     for i in range(1, 101):
         num_str = str(i).zfill(2)
         info = rifa[str(i)]
@@ -128,12 +130,18 @@ def generar_texto_lista():
             texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
             nombre = info.get("nombre", "Usuario")
-            texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
+            user_id = info.get("user_id", "")
+            # Si tenemos el ID del usuario, ponemos el formato interactivo con arroba
+            if user_id:
+                texto += f"🔴 *{num_str}*: Ocupado por @{user_id}\n"
+                menciones_lista.append(f"{user_id}@s.whatsapp.net")
+            else:
+                texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
             
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     if data.get("estado_rifa") == "finalizada":
         texto += "\n\n🔒 *ESTADO:* Sorteo cerrado/finalizado."
-    return texto
+    return texto, menciones_lista
 
 @app.route("/", methods=["GET"])
 def index():
@@ -195,7 +203,8 @@ def webhook():
         if sender_id == ADMIN_PHONE:
             if comando.startswith("/reset"):
                 borrar_y_recrear_base_datos()
-                enviar_whatsapp(sender_id, "🔄 *¡Gran Sorteo 100 ha sido reseteado con éxito!* Todos los números vuelven a estar disponibles.\n\n" + generar_texto_lista())
+                texto_lista, _ = generar_texto_lista()
+                enviar_whatsapp(sender_id, "🔄 *¡Gran Sorteo 100 ha sido reseteado con éxito!* Todos los números vuelven a estar disponibles.\n\n" + texto_lista)
                 return jsonify({"status": "success"}), 200
 
             elif comando.startswith("/ganador"):
@@ -243,7 +252,7 @@ def webhook():
                     num_lib = partes_cmd[1].strip()
                     if num_lib.isdigit() and 1 <= int(num_lib) <= 100:
                         n_str = str(int(num_lib))
-                        rifa[n_str] = {"estado": "disponible", "nombre": "", "user_id": "", "username": ""}
+                        rifa[n_str] = {"estado": "disponible", "nombre": "", "user_id": "", "username": "", "jid_completo": ""}
                         data_rifa["numeros"] = rifa
                         guardar_data_completa(data_rifa)
                         enviar_whatsapp(sender_id, f"🟢 El número {n_str.zfill(2)} ha sido liberado.")
@@ -261,6 +270,7 @@ def webhook():
                     user_tel = sol["user_id"]
                     user_nums = sol["numeros"]
                     chat_origen = sol["chat_origen"]
+                    jid_completo = sol.get("jid_completo", sender_full_jid)
                     nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
 
                     if accion == "conf":
@@ -268,6 +278,7 @@ def webhook():
                             rifa[n]["estado"] = "ocupado"
                             rifa[n]["nombre"] = user_nombre
                             rifa[n]["user_id"] = user_tel
+                            rifa[n]["jid_completo"] = jid_completo
 
                         del solicitudes[req_id]
                         data_rifa["numeros"] = rifa
@@ -290,16 +301,16 @@ def webhook():
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
-                        # Enviar al grupo origen con mención interactiva
+                        # Enviar al grupo origen con mención interactiva limpia usando el JID completo
                         try:
                             if chat_origen != user_tel:
-                                enviar_whatsapp(chat_origen, texto_pago_confirmado, mencion_jid=user_tel)
+                                enviar_whatsapp(chat_origen, texto_pago_confirmado, mencion_jid=jid_completo)
                         except Exception as e:
                             print(f"Error enviando confirmación al grupo: {e}")
 
                     elif accion == "rech":
                         for n in user_nums:
-                            rifa[n] = {"estado": "disponible", "nombre": "", "user_id": "", "username": ""}
+                            rifa[n] = {"estado": "disponible", "nombre": "", "user_id": "", "username": "", "jid_completo": ""}
 
                         del solicitudes[req_id]
                         data_rifa["numeros"] = rifa
@@ -316,10 +327,23 @@ def webhook():
 
         # --- COMANDOS GENERALES Y CONSULTAS ---
         if comando in ["hola", "buenas", "lista", "inicio", "rifa", "sorteo"]:
-            respuesta = f"¡Hola {push_name}! Estado actual de Gran Sorteo 100:\n\n{generar_texto_lista()}"
+            texto_lista, menciones_lista = generar_texto_lista()
+            respuesta = f"¡Hola {push_name}! Estado actual de Gran Sorteo 100:\n\n{texto_lista}"
             if estado_actual_rifa == "activa":
                 respuesta += "\n\n👉 *¿Cómo comprar?* Envía los números que deseas separados por coma (ej: *7, 14*)."
-            enviar_whatsapp(remote_jid, respuesta)
+            
+            # Si hay menciones en la lista, las pasamos para que sean interactivas también ahí
+            if menciones_lista:
+                # Si enviamos múltiples menciones, Evolution API soporta una lista en "mentioned"
+                url_lista = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
+                headers = {"apikey": EVOLUTION_API_KEY, "Content-Type": "application/json"}
+                payload = {"number": str(remote_jid).strip(), "text": respuesta, "mentioned": menciones_lista}
+                try:
+                    requests.post(url_lista, json=payload, headers=headers)
+                except:
+                    enviar_whatsapp(remote_jid, respuesta)
+            else:
+                enviar_whatsapp(remote_jid, respuesta)
             return jsonify({"status": "success"}), 200
 
         if comando == "/reglas":
@@ -381,6 +405,7 @@ def webhook():
                 solicitudes[req_id] = {
                     "nombre": push_name,
                     "user_id": sender_id,
+                    "jid_completo": sender_full_jid,
                     "numeros": validos_para_reservar,
                     "chat_origen": remote_jid
                 }
@@ -393,7 +418,6 @@ def webhook():
                 cantidad_nums = len(validos_para_reservar)
                 total_a_pagar, promo_txt = calcular_total_promocion(cantidad_nums)
 
-                # AQUÍ ESTÁ EL CAMBIO: Se usa @{sender_id} para que WhatsApp lo convierta en mención interactiva verde
                 msg_cliente = (
                     f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
                     f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
@@ -406,7 +430,7 @@ def webhook():
 
                 enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_full_jid)
 
-                # Mensaje para el administrador mostrando limpiamente el Nombre Real del cliente y botones funcionales
+                # Mensaje para el administrador
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
 
