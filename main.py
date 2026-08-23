@@ -71,6 +71,7 @@ def guardar_data_completa(data):
         print(f"Error al guardar JSON: {e}")
 
 def enviar_whatsapp(numero, texto, mencion_jid=None):
+    """Envía un mensaje de texto usando Evolution API, soportando menciones interactivas"""
     url = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
     headers = {
         "apikey": EVOLUTION_API_KEY,
@@ -131,6 +132,7 @@ def generar_texto_lista():
             user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
             if user_id and jid_completo:
+                # Usamos el número/ID del usuario con arroba para que WhatsApp lo convierta en enlace interactivo verde
                 texto += f"🔴 *{num_str}*: Ocupado por @{user_id}\n"
                 menciones_lista.append(jid_completo)
             else:
@@ -257,6 +259,7 @@ def webhook():
                         enviar_whatsapp(sender_id, f"🟢 El número {n_str.zfill(2)} ha sido liberado.")
                 return jsonify({"status": "success"}), 200
 
+            # GESTIÓN DE APROBACIÓN O RECHAZO DESDE EL CHAT DEL ADMIN
             if comando.startswith("conf_") or comando.startswith("rech_"):
                 partes_cb = comando.split("_", 1)
                 accion = partes_cb[0]
@@ -293,11 +296,13 @@ def webhook():
                             f"Tu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre."
                         )
 
+                        # Enviar al privado del usuario
                         try:
                             enviar_whatsapp(user_tel, texto_pago_confirmado)
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
+                        # Enviar al grupo origen con mención interactiva verde
                         try:
                             if chat_origen != user_tel:
                                 enviar_whatsapp(chat_origen, texto_pago_confirmado, mencion_jid=jid_completo)
@@ -319,7 +324,7 @@ def webhook():
                         except Exception as e:
                             print(f"Error notificando rechazo: {e}")
 
-                return jsonify({"status": "success"}), 200
+                    return jsonify({"status": "success"}), 200
 
         # --- COMANDOS GENERALES Y CONSULTAS ---
         if comando in ["hola", "buenas", "lista", "inicio", "rifa", "sorteo"]:
@@ -412,6 +417,7 @@ def webhook():
                 cantidad_nums = len(validos_para_reservar)
                 total_a_pagar, promo_txt = calcular_total_promocion(cantidad_nums)
 
+                # Usamos @sender_id para que WhatsApp pinte la mención interactiva en verde
                 msg_cliente = (
                     f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
                     f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
@@ -424,6 +430,7 @@ def webhook():
 
                 enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_full_jid)
 
+                # Mensaje para el administrador con mención interactiva verde del cliente
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
 
@@ -436,7 +443,6 @@ def webhook():
                     f"👉 *APROBAR:* {link_aprobar}\n\n"
                     f"👉 *RECHAZAR:* {link_rechazar}"
                 )
-                
                 enviar_whatsapp(ADMIN_PHONE, txt_admin, mencion_jid=sender_full_jid)
 
             return jsonify({"status": "success"}), 200
