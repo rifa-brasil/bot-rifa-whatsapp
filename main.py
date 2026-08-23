@@ -1,9 +1,12 @@
 import os
 import json
+import requests
+import re
 import uuid
-import asyncio
-from datetime import datetime
-from aiohttp import web
+from datetime import datetime, timedelta
+from flask import Flask, request, jsonify
+
+app = Flask(__name__)
 
 # --- CONFIGURACIÓN DE CREDENCIALES DE WHATSAPP ---
 WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN")  # Token permanente o temporal de Meta Cloud API
