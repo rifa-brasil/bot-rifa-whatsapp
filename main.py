@@ -260,7 +260,7 @@ def webhook():
                         enviar_whatsapp(sender_id, f"🟢 El número {n_str.zfill(2)} ha sido liberado.")
                 return jsonify({"status": "success"}), 200
 
-            if comando.startswith("conf_") or comando.startswith("rech_"):
+            elif comando.startswith("conf_") or comando.startswith("rech_"):
                 partes_cb = comando.split("_", 1)
                 accion = partes_cb[0]
                 req_id = partes_cb[1] if len(partes_cb) > 1 else ""
@@ -334,7 +334,7 @@ def webhook():
             enviar_whatsapp(remote_jid, respuesta, mencion_jid=menciones_lista if menciones_lista else None)
             return jsonify({"status": "success"}), 200
 
-        if comando == "/reglas":
+        elif comando == "/reglas":
             texto_reglas = (
                 f"📌 *Reglas de Gran Sorteo 100:*\n"
                 f"1. Escribe `lista` para ver los números disponibles (del 01 al 100).\n"
@@ -434,6 +434,8 @@ def webhook():
                 enviar_whatsapp(ADMIN_PHONE, txt_admin, mencion_jid=sender_full_jid)
 
             return jsonify({"status": "success"}), 200
+
+        return jsonify({"status": "ignored_text"}), 200
 
     except Exception as e:
         print(f"Error procesando webhook: {e}")
