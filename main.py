@@ -23,7 +23,6 @@ PRECIO_2_NUMEROS = 18.0  # Paquete de 2
 PRECIO_3_NUMEROS = 25.0  # Paquete de 3
 PRECIO_4_NUMEROS = 32.0  # Paquete de 4
 PRECIO_5_NUMEROS = 40.0  # Paquete de 5
-# A partir de 5, cada número adicional suma el valor unitario base
 
 def inicializar_rifa():
     try:
@@ -79,7 +78,7 @@ def enviar_whatsapp(numero, texto, mencion_jid=None):
         "Content-Type": "application/json"
     }
     payload = {
-        "number": numero,
+        "number": str(numero).strip(),
         "text": texto
     }
     if mencion_jid:
@@ -93,7 +92,6 @@ def enviar_whatsapp(numero, texto, mencion_jid=None):
         return None
 
 def calcular_total_promocion(cantidad):
-    """Calcula el total según la cantidad exacta de números y sus paquetes"""
     if cantidad <= 0:
         return 0.0, "Sin números"
     elif cantidad == 1:
@@ -135,12 +133,10 @@ def generar_texto_lista():
         texto += "\n\n🔒 *ESTADO:* Sorteo cerrado/finalizado."
     return texto
 
-# --- RUTA WEB PARA RENDER (HEALTH CHECK) ---
 @app.route("/", methods=["GET"])
 def index():
     return "Bot de Gran Sorteo 100 para WhatsApp Activo y en Línea 24/7!", 200
 
-# --- WEBHOOK PRINCIPAL DE EVOLUTION API ---
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
@@ -160,12 +156,21 @@ def webhook():
         remote_jid = msg_data.get("key", {}).get("remoteJid", "")
         is_group = "@g.us" in remote_jid
         
+        # Extracción segura y robusta del identificador del remitente
+        sender_full_jid = ""
         if is_group:
-            sender_id = msg_data.get("participant", "").split("@")[0]
-            sender_full_jid = msg_data.get("participant", "")
+            sender_full_jid = msg_data.get("participant", "") or msg_data.get("key", {}).get("participant", "")
+            if not sender_full_jid and "remoteJid" in msg_data.get("key", {}):
+                # Fallback por si acaso
+                pass
         else:
-            sender_id = remote_jid.split("@")[0]
             sender_full_jid = remote_jid
+
+        if "@" in sender_full_jid:
+            sender_id = sender_full_jid.split("@")[0]
+        else:
+            # Si por alguna razón vino sin sufijo, intentamos limpiar remote_jid o usar un respaldo
+            sender_id = remote_jid.split("@")[0]
 
         message_content = msg_data.get("message", {})
         mensaje_texto = ""
@@ -179,7 +184,6 @@ def webhook():
 
         mensaje_texto = mensaje_texto.strip()
         comando = mensaje_texto.lower()
-        
         push_name = msg_data.get("pushName", "Usuario")
 
         data_rifa = obtener_data_completa()
@@ -284,13 +288,19 @@ def webhook():
                             f"Tu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre."
                         )
 
-                        # Enviar obligatoriamente al privado del usuario y también al chat de origen (grupo)
+                        # Enviar obligatoriamente al privado del usuario
                         try:
-                            enviar_whatsapp(user_tel, texto_pago_confirmado)
+                            res_priv = enviar_whatsapp(user_tel, texto_pago_confirmado)
+                            print(f"Respuesta envío privado confirmación: {res_priv}")
+                        except Exception as e:
+                            print(f"Error enviando confirmación al privado: {e}")
+
+                        # Enviar también al chat de origen si fue en un grupo diferente
+                        try:
                             if chat_origen != user_tel:
                                 enviar_whatsapp(chat_origen, texto_pago_confirmado)
                         except Exception as e:
-                            print(f"Error enviando confirmación de pago: {e}")
+                            print(f"Error enviando confirmación al grupo: {e}")
 
                     elif accion == "rech":
                         for n in user_nums:
@@ -400,7 +410,7 @@ def webhook():
 
                 enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_full_jid)
 
-                # Enlaces limpios para el admin con el número correctamente completado en azul
+                # Generar enlaces con el número de usuario asegurado
                 link_chat_usuario = f"https://wa.me/{sender_id}"
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
@@ -408,7 +418,7 @@ def webhook():
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                     f"👤 *Cliente:* {push_name}\n"
-                    f"📱 *Abrir chat del usuario:* {link_chat_usuario}\n"
+                    f"💬 *Abrir chat con {push_name}:* {link_chat_usuario}\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
