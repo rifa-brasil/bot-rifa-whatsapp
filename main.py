@@ -2,9 +2,16 @@ import os
 import json
 import uuid
 import requests
-import psycopg2
 from urllib.parse import urlparse
 from flask import Flask, request, jsonify
+
+# Intento de importar psycopg2 con respaldo por si falta en el entorno
+try:
+    import psycopg2
+    HAS_PSYCOPG2 = True
+except ImportError:
+    HAS_PSYCOPG2 = False
+    print("Advertencia: psycopg2 no está instalado. El bot usará almacenamiento local temporal.")
 
 app = Flask(__name__)
 
@@ -14,16 +21,28 @@ INSTANCE_NAME = os.environ.get("INSTANCE_NAME", "mi-bot")
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 VALOR_POR_NUMERO = 10
 
+# Memoria local de respaldo por si no hay conexión a base de datos
+MEMORIA_LOCAL = {
+    "estado_rifa": "activa",
+    "numeros": {str(i): {"estado": "disponible", "nombre": "", "user_id": ""} for i in range(1, 101)},
+    "solicitudes_pendientes": {},
+    "idiomas_usuarios": {}
+}
+
 def get_db_connection():
-    if DATABASE_URL:
-        url = urlparse(DATABASE_URL)
-        return psycopg2.connect(
-            database=url.path[1:],
-            user=url.username,
-            password=url.password,
-            host=url.hostname,
-            port=url.port
-        )
+    if HAS_PSYCOPG2 and DATABASE_URL:
+        try:
+            url = urlparse(DATABASE_URL)
+            return psycopg2.connect(
+                database=url.path[1:],
+                user=url.username,
+                password=url.password,
+                host=url.hostname,
+                port=url.port
+            )
+        except Exception as e:
+            print(f"Error al conectar a PostgreSQL: {e}")
+            return None
     return None
 
 def inicializar_bd():
@@ -46,17 +65,12 @@ def inicializar_bd():
         cur.close()
         conn.close()
     except Exception as e:
-        print(f"Error BD: {e}")
+        print(f"Error al inicializar BD: {e}")
 
 def obtener_data_completa():
     conn = get_db_connection()
     if not conn:
-        return {
-            "estado_rifa": "activa",
-            "numeros": {str(i): {"estado": "disponible", "nombre": "", "user_id": ""} for i in range(1, 101)},
-            "solicitudes_pendientes": {},
-            "idiomas_usuarios": {}
-        }
+        return MEMORIA_LOCAL
     try:
         cur = conn.cursor()
         cur.execute("SELECT data FROM rifa_estado WHERE id = 1;")
@@ -71,9 +85,11 @@ def obtener_data_completa():
             return data
     except Exception as e:
         print(f"Error al leer BD: {e}")
-    return {}
+    return MEMORIA_LOCAL
 
 def guardar_data_completa(data):
+    global MEMORIA_LOCAL
+    MEMORIA_LOCAL = data
     conn = get_db_connection()
     if not conn:
         return
