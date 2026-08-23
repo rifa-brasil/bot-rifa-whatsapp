@@ -25,7 +25,7 @@ NUMERO_ADMIN_SEGURO = "48824359"
 BOT_ASISTENTE_PHONE = "5562993984530"
 
 # 🔑 CLAVE SECRETA DE ADMINISTRADOR
-CLAVE_RESET = "admin.resetear.rifa.99"
+CLAVE_RESET = "resetlist"
 
 DB_FILE = "rifa_db.json"
 
@@ -35,7 +35,8 @@ def inicializar_rifa():
             data_inicial = {
                 "estado_rifa": "activa",
                 "numeros": {str(i): {"estado": "disponible", "nombre": "", "telefono": "", "enlace": "", "solicitud_id": ""} for i in range(1, 101)},
-                "solicitudes_pendientes": {}
+                "solicitudes_pendientes": {},
+                "usuarios_participantes": [] # Registro para la promoción de primera vez
             }
             with open(DB_FILE, "w") as f:
                 json.dump(data_inicial, f, indent=4)
@@ -59,6 +60,8 @@ def obtener_data_completa():
                 data["estado_rifa"] = "activa"
             if "solicitudes_pendientes" not in data:
                 data["solicitudes_pendientes"] = {}
+            if "usuarios_participantes" not in data:
+                data["usuarios_participantes"] = []
             return data
     except Exception as e:
         print(f"🔴 Error al leer JSON (recreando base): {e}")
@@ -89,27 +92,25 @@ def generar_texto_lista():
         elif estado == "pendiente":
             texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
-            if info.get("enlace"):
-                link = info["enlace"]
-            elif info.get("telefono"):
-                tel_limpio = info["telefono"].replace("+", "").strip()
-                link = f"wa.me/{tel_limpio}"
+            nombre = info.get("nombre", "Usuario")
+            telefono = info.get("telefono", "")
+            tel_limpio = telefono.replace("+", "").strip()
+            
+            # Enlace de contacto al lado del número ocupado
+            if tel_limpio:
+                link_chat = f"wa.me/{tel_limpio}"
+                texto += f"🔴 *{num_str}*: Ocupado por {nombre} (📱 {link_chat})\n"
             else:
-                link = ""
-
-            if link:
-                texto += f"🔴 *{num_str}*: Ocupado por {info['nombre']} 👉 {link}\n"
-            else:
-                texto += f"🔴 *{num_str}*: Ocupado por {info['nombre']}\n"
+                texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
             
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
-    if data.get("estado_rifa") == "finalizada":
-        texto += "\n\n🔒 *ESTADO:* Rifa cerrada/finalizada. No se permiten más modificaciones."
+    estado_rifa = data.get("estado_rifa")
+    if estado_rifa == "finalizada" or estado_rifa == "bloqueada":
+        texto += "\n\n🔒 *ESTADO:* Rifa cerrada/bloqueada. No se permiten más modificaciones."
     return texto
 
 def enviar_mensaje_evolution(chat_id, texto, menciones=[]):
     url_envio = f"{SERVER_URL.rstrip('/')}/message/sendText/{INSTANCE_NAME}"
-    
     payload = {
         "number": chat_id,
         "text": texto
@@ -139,19 +140,13 @@ def webhook():
     try:
         data_webhook = request.get_json(silent=True)
         if not data_webhook:
-            # Por si acaso llega en formato form o texto plano
             data_webhook = request.form.to_dict()
 
         if not data_webhook:
-            print("⚠️ Webhook recibido sin datos JSON legibles.")
             return "No data", 200
-
-        # REGISTRO CLAVE PARA VER QUÉ RECIBE RENDER
-        print(f"📥 JSON RECIBIDO: {json.dumps(data_webhook, indent=2)}")
 
         event = data_webhook.get("event", "").lower()
         if "messages.upsert" not in event and "messages_upsert" not in event:
-            print(f"⚠️ Evento ignorado o desconocido: {event}")
             return "Ignored event", 200
 
         data_msg = data_webhook.get("data", {})
@@ -171,9 +166,7 @@ def webhook():
             return "Ignored loop", 200
 
         remote_jid = data_msg.get("key", {}).get("remoteJid", "")
-        
         numero_persona = re.sub(r'\D', '', remote_jid.split("@")[0])
-        
         push_name = data_msg.get("pushName", "")
         nombre_usuario = push_name.strip() or f"+{numero_persona}"
 
@@ -181,17 +174,21 @@ def webhook():
         rifa = data_rifa["numeros"]
         solicitudes = data_rifa.get("solicitudes_pendientes", {})
         estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
+        usuarios_participantes = data_rifa.get("usuarios_participantes", [])
         
         respuesta = ""
-
         es_admin_general = (NUMERO_ADMIN_SEGURO in numero_persona) or (WHATSAPP_ADMIN_PHONE in numero_persona)
 
+        # 1. COMANDO RESETLIST
         if comando == CLAVE_RESET:
             if not es_admin_general:
                 return "OK", 200
             borrar_y_recrear_base_datos()
             respuesta = "🔄 *¡La rifa ha sido reseteada con éxito!* Todos los 100 números vuelven a estar disponibles y el sistema está abierto.\n\n" + generar_texto_lista()
+            enviar_mensaje_evolution(remote_jid, respuesta)
+            return "OK", 200
 
+        # 2. COMANDOS DE ADMINISTRADOR (CONFIRMAR / RECHAZAR)
         elif comando.startswith("confirmar ") or comando.startswith("rechazar "):
             if not es_admin_general:
                 return "OK", 200
@@ -214,34 +211,46 @@ def webhook():
                 grupo_origen = sol["grupo_id"]
 
                 nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
+                numero_limpio = user_phone.replace("+", "").strip()
+                user_chat_id = f"{numero_limpio}@s.whatsapp.net"
 
                 if accion == "confirmar":
                     for n in user_nums:
                         rifa[n]["estado"] = "ocupado"
                         rifa[n]["nombre"] = user_nombre
                         rifa[n]["telefono"] = user_phone
-                        rifa[n]["enlace"] = f"wa.me/{user_phone.replace('+', '').strip()}"
+                        rifa[n]["enlace"] = f"wa.me/{numero_limpio}"
+
+                    # Registrar usuario en participantes si no estaba
+                    if numero_limpio not in usuarios_participantes:
+                        usuarios_participantes.append(numero_limpio)
 
                     del solicitudes[req_id_encontrado]
                     data_rifa["numeros"] = rifa
                     data_rifa["solicitudes_pendientes"] = solicitudes
+                    data_rifa["usuarios_participantes"] = usuarios_participantes
 
+                    # Verificar si se completaron los 100 números para BLOQUEAR la rifa
                     todos_ocupados = all(rifa[str(n)]["estado"] == "ocupado" for n in range(1, 101))
                     if todos_ocupados:
-                        data_rifa["estado_rifa"] = "finalizada"
+                        data_rifa["estado_rifa"] = "bloqueada"
 
                     guardar_data_completa(data_rifa)
 
-                    numero_limpio = user_phone.replace("+", "").strip()
-                    user_chat_id = f"{numero_limpio}@s.whatsapp.net"
-
                     enviar_mensaje_evolution(remote_jid, f"✅ *Solicitud {req_id_encontrado} APROBADA.* Los números ({nums_formatted}) fueron asignados exitosamente a {user_nombre}.")
 
+                    # Notificación limpia en el grupo sin anunciar ganador automáticamente
                     msg_grupo = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Usuario:* @{numero_limpio}\n🎟️ *Números asignados:* *{nums_formatted}*\n\n¡Gracias por tu compra y mucha suerte! 🤝"
                     enviar_mensaje_evolution(grupo_origen, msg_grupo, menciones=[user_chat_id])
                     
-                    msg_privado = f"🎉 *¡Hola {user_nombre}!* 🎉\n\nTe confirmo que tu pago ha sido verificado con éxito. Tus números (*{nums_formatted}*) ya están registrados oficialmente a tu nombre en el grupo de la rifa.\n\n¡Mucha suerte! 🍀"
+                    # Notificación por privado al usuario
+                    msg_privado = f"🎉 *¡Hola {user_nombre}!* 🎉\n\nTe confirmo que tu pago ha sido verificado con éxito. Tus números (*{nums_formatted}*) ya están registrados oficialmente a tu nombre.\n\n¡Mucha suerte! 🍀"
                     enviar_mensaje_evolution(user_chat_id, msg_privado)
+
+                    # Si se completaron los 100 números, avisar bloqueo
+                    if todos_ocupados:
+                        msg_cierre = "🔒 *¡ATENCIÓN! Se han ocupado los 100 números de la rifa.* El sistema se ha bloqueado automáticamente y pronto se dará a conocer el ganador."
+                        enviar_mensaje_evolution(grupo_origen, msg_cierre)
 
                 elif accion == "rechazar":
                     for n in user_nums:
@@ -254,14 +263,15 @@ def webhook():
 
                     enviar_mensaje_evolution(remote_jid, f"❌ *Solicitud {req_id_encontrado} RECHAZADA.* Los números ({nums_formatted}) vuelven a estar disponibles.")
                     
-                    msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola {user_nombre}, tu solicitud para el/los número(s) *{nums_formatted}* fue rechazada. Los números vuelven a estar 🟢 *Disponibles* para los demás participantes."
+                    msg_grupo = f"⚠️ *SOLICITUD CANCELADA* ⚠️\n\nHola {user_nombre}, tu solicitud para el/los número(s) *{nums_formatted}* fue rechazada. Los números vuelven a estar 🟢 *Disponibles*."
                     enviar_mensaje_evolution(grupo_origen, msg_grupo)
 
             else:
                 enviar_mensaje_evolution(remote_jid, f"⚠️ No se encontró la solicitud ID: `{req_id_input}` o ya fue procesada.")
             return "OK", 200
 
-        elif comando in ["hola", "buenas", "lista", "inicio", "rifa"]:
+        # 3. COMANDO LISTA ESTRICTO
+        elif comando == "lista":
             respuesta = (
                 f"¡Hola {nombre_usuario}! Aquí tienes el estado actual de la Rifa. ✨\n\n"
                 f"💵 *Compra uno o varios números por un valor de 10 reales y gana 400 reales.*\n"
@@ -270,14 +280,17 @@ def webhook():
             )
             if estado_actual_rifa == "activa":
                 respuesta += "\n\n👉 *¿Cómo comprar?* Responde escribiendo el número que deseas (ej: *7, 14*)."
+            enviar_mensaje_evolution(remote_jid, respuesta)
+            return "OK", 200
 
+        # 4. PROCESAMIENTO DE SELECCIÓN DE NÚMEROS / PROMOCIÓN DE PRIMERA VEZ
         else:
             partes = [p.strip() for p in mensaje_texto.split(",")]
             es_lista_numeros = all(p.isdigit() for p in partes) if partes and mensaje_texto else False
 
             if es_lista_numeros:
-                if estado_actual_rifa == "finalizada":
-                    respuesta = "🔒 *Lo sentimos, el sistema está cerrado.* El sorteo ya concluyó o está congelado."
+                if estado_actual_rifa in ["finalizada", "bloqueada"]:
+                    respuesta = "🔒 *Lo sentimos, el sistema está cerrado.* La rifa ya concluyó o está bloqueada."
                     enviar_mensaje_evolution(remote_jid, respuesta)
                     return "OK", 200
 
@@ -303,7 +316,7 @@ def webhook():
                 if ocupados:
                     mensajes_conflicto.append(f"🔴 El/los número(s) {', '.join(ocupados)} ya está(n) *OCUPADO(S)*.")
                 if pendientes:
-                    mensajes_conflicto.append(f"🟡 El/los número(s) {', '.join(pendientes)} está(n) *EN PROCESO DE VERIFICACIÓN DE PAGO* por otro participante.")
+                    mensajes_conflicto.append(f"🟡 El/los número(s) {', '.join(pendientes)} está(n) *EN PROCESO DE VERIFICACIÓN DE PAGO*.")
                 if invalidos:
                     mensajes_conflicto.append(f"⚠️ El/los número(s) {', '.join(invalidos)} está(n) fuera del rango (1 al 100).")
 
@@ -331,11 +344,17 @@ def webhook():
                     guardar_data_completa(data_rifa)
 
                     nums_solicitados_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
+                    
+                    # 💡 Lógica de Promoción: Primera jugada y compra de más de un número
+                    es_primera_vez = numero_persona not in usuarios_participantes
+                    promocion_aplicada_txt = ""
+                    if es_primera_vez and len(validos_participantes_condicion := validos_para_reservar) > 1:
+                        promocion_aplicada_txt = "\n\n🎁 *¡Promoción de Primera Vez aplicada!* (Estás participando con más de un número en tu primera compra)."
 
                     txt_grupo = (
                         f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
                         f"Hola {nombre_usuario}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
-                        f"🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu transferencia."
+                        f"🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu transferencia.{promocion_aplicada_txt}"
                     )
                     if mensajes_conflicto:
                         txt_grupo += "\n\n📌 *Nota:* " + " \n".join(mensajes_conflicto)
@@ -344,11 +363,14 @@ def webhook():
 
                     link_confirmar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=confirmar%20{req_id}"
                     link_rechazar = f"wa.me/{BOT_ASISTENTE_PHONE}?text=rechazar%20{req_id}"
+                    
+                    # Enlaces de contacto directos en formato clickable para el Admin
+                    link_wa_cliente = f"wa.me/{numero_persona}"
 
                     txt_admin = (
                         f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                         f"👤 *Cliente:* {nombre_usuario}\n"
-                        f"📱 *Teléfono:* wa.me/{numero_persona}\n"
+                        f"📱 *Teléfono:* {link_wa_cliente}\n"
                         f"🎟️ *Números:* *{nums_solicitados_txt}*\n\n"
                         f"-----------------------------------\n"
                         f"Toca una opción para responder:\n\n"
