@@ -71,7 +71,7 @@ def guardar_data_completa(data):
         print(f"Error al guardar JSON: {e}")
 
 def enviar_whatsapp(numero, texto, mencion_jid=None):
-    """Envía un mensaje usando Evolution API y fuerza la mención interactiva tipo link"""
+    """Envía un mensaje usando Evolution API permitiendo menciones interactivas en verde"""
     url = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
     headers = {
         "apikey": EVOLUTION_API_KEY,
@@ -218,7 +218,6 @@ def webhook():
                     enviar_whatsapp(sender_id, f"⚠️ El número *{num_ingresado.zfill(2)}* no está ocupado.")
                     return jsonify({"status": "success"}), 200
 
-                ganador_nombre = info_num.get("nombre")
                 ganador_tel = info_num.get("user_id")
                 num_formateado = num_str.zfill(2)
 
@@ -278,7 +277,7 @@ def webhook():
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
-                        # 2. Mensaje al grupo de origen con mención interactiva limpia usando el JID exacto
+                        # 2. Mensaje al grupo de origen mencionando correctamente con @ y JID interactivo
                         try:
                             if chat_origen != user_tel:
                                 texto_pago_grupo = (
@@ -385,7 +384,7 @@ def webhook():
                 cantidad_nums = len(validos_para_reservar)
                 total_a_pagar, promo_txt = calcular_total_promocion(cantidad_nums)
 
-                # 1. Mensaje de Solicitud Recibida al grupo con mención interactiva limpia usando el ID del usuario
+                # 1. Mensaje de Solicitud Recibida al grupo con @ y mención interactiva limpia
                 msg_cliente = (
                     f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
                     f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
@@ -395,7 +394,7 @@ def webhook():
                     msg_cliente += f"🔥 *Promoción:* {promo_txt}\n"
                 
                 msg_cliente += f"\n🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu pago."
-                enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_full_jid)
+                enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_id)
 
                 # 2. Mensaje para el administrador con mención interactiva limpia del cliente
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
@@ -410,7 +409,7 @@ def webhook():
                     f"👉 *APROBAR:* {link_aprobar}\n\n"
                     f"👉 *RECHAZAR:* {link_rechazar}"
                 )
-                enviar_whatsapp(ADMIN_PHONE, txt_admin, mencion_jid=sender_full_jid)
+                enviar_whatsapp(ADMIN_PHONE, txt_admin, mencion_jid=sender_id)
 
         return jsonify({"status": "success"}), 200
 
