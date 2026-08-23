@@ -132,7 +132,6 @@ def generar_texto_lista():
             user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
             if user_id and jid_completo:
-                # Usamos el número/ID del usuario con arroba para que WhatsApp lo convierta en enlace interactivo verde
                 texto += f"🔴 *{num_str}*: Ocupado por @{user_id}\n"
                 menciones_lista.append(jid_completo)
             else:
@@ -142,7 +141,7 @@ def generar_texto_lista():
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     if data.get("estado_rifa") == "finalizada":
         texto += "\n\n🔒 *ESTADO:* Sorteo cerrado/finalizado."
-    return texto, menciones_lista
+    return texto, mencions_lista
 
 @app.route("/", methods=["GET"])
 def index():
@@ -324,7 +323,7 @@ def webhook():
                         except Exception as e:
                             print(f"Error notificando rechazo: {e}")
 
-                    return jsonify({"status": "success"}), 200
+                return jsonify({"status": "success"}), 200
 
         # --- COMANDOS GENERALES Y CONSULTAS ---
         if comando in ["hola", "buenas", "lista", "inicio", "rifa", "sorteo"]:
@@ -417,7 +416,6 @@ def webhook():
                 cantidad_nums = len(validos_para_reservar)
                 total_a_pagar, promo_txt = calcular_total_promocion(cantidad_nums)
 
-                # Usamos @sender_id para que WhatsApp pinte la mención interactiva en verde
                 msg_cliente = (
                     f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
                     f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
@@ -443,6 +441,9 @@ def webhook():
                     f"👉 *APROBAR:* {link_aprobar}\n\n"
                     f"👉 *RECHAZAR:* {link_rechazar}"
                 )
+                
+                # <--- AQUÍ ESTÁ EL CAMBIO PRINCIPAL --->
+                # Se añadió `mencion_jid=sender_full_jid` para que al admin también le llegue en verde
                 enviar_whatsapp(ADMIN_PHONE, txt_admin, mencion_jid=sender_full_jid)
 
             return jsonify({"status": "success"}), 200
