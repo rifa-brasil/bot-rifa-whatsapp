@@ -150,12 +150,11 @@ def generar_texto_lista():
 
 @app.route("/", methods=["GET"])
 def index():
-    return "Bot Activo", 200
+    return "Bot de Rifa WhatsApp Activo y en Línea 24/7!", 200
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        # IMPRIMIR TODO EL JSON CRUDO QUE LLEGUE PARA VERLO EN LOS LOGS DE RENDER
         raw_data = request.get_json(silent=True)
         print("=== WEBHOOK RECIBIDO ===")
         print(json.dumps(raw_data, indent=2))
@@ -163,7 +162,6 @@ def webhook():
         if not raw_data:
             return jsonify({"status": "ignored"}), 200
 
-        # Extraer datos de manera flexible
         msg_data = raw_data.get("data", {})
         key = msg_data.get("key", {})
         
@@ -174,7 +172,6 @@ def webhook():
         remitente_jid = key.get("remoteJid") or msg_data.get("sender") or raw_data.get("sender", "")
         push_name = msg_data.get("pushName", "Usuario")
         
-        # Buscar el texto del mensaje en cualquier variante posible de Evolution API
         message_body = msg_data.get("message", {})
         texto_mensaje = ""
         if isinstance(message_body, dict):
@@ -187,7 +184,6 @@ def webhook():
         elif isinstance(message_body, str):
             texto_mensaje = message_body
 
-        # Si aún así no hay texto, revisar si viene directo en data
         if not texto_mensaje:
             texto_mensaje = msg_data.get("text", "") or raw_data.get("text", "")
 
@@ -205,15 +201,15 @@ def webhook():
 
         if mensaje_limpio in ["hola", "buenas", "lista", "inicio", "rifa", "sorteo"]:
             enviar_mensaje_whatsapp(remitente_jid, f"¡Hola @{user_id}! Estado actual:\n\n{generar_texto_lista()}")
-            return jsonify({"status": "ok"}), 200
+            return jsonify({"status": "processed"}), 200
 
         if mensaje_limpio == "reglas":
             enviar_mensaje_whatsapp(remitente_jid, f"📌 *Reglas:* 100 números. Premio: *{calcular_premio_total()} reales*.")
-            return jsonify({"status": "ok"}), 200
+            return jsonify({"status": "processed"}), 200
 
         partes = [p.strip() for p in texto_mensaje.split(",")]
         if all(p.isdigit() for p in partes) if partes else False:
-            validos = [str(int(p)) for p in partes if 1 <= int(p) <= 100 and rifa[str(int(p))].get("estado"] == "disponible"]
+            validos = [str(int(p)) for p in partes if 1 <= int(p) <= 100 and rifa[str(int(p))].get("estado") == "disponible"]
             if validos:
                 ya_tiene = usuario_tiene_jugada_previa(user_id, data_rifa)
                 req_id = "r" + str(uuid.uuid4().int)[:4]
@@ -227,7 +223,7 @@ def webhook():
     except Exception as e:
         print(f"Excepción crítica en webhook: {e}")
 
-    return jsonify({"status": "ok"}), 200
+    return jsonify({"status": "processed"}), 200
 
 if __name__ == "__main__":
     inicializar_bd()
