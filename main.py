@@ -132,6 +132,7 @@ def generar_texto_lista():
             nombre = info.get("nombre", "Usuario")
             jid_completo = info.get("jid_completo", "")
             if jid_completo:
+                # Se muestra con arroba y el nombre del usuario para que sea interactivo
                 texto += f"🔴 *{num_str}*: Ocupado por @{nombre}\n"
                 menciones_lista.append(jid_completo)
             else:
@@ -427,20 +428,21 @@ def webhook():
 
                 enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_full_jid)
 
-                # Mensaje para el administrador
+                # Mensaje para el administrador con el nombre del usuario formateado con arroba
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
 
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* {push_name}\n"
+                    f"👤 *Cliente:* @{push_name}\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
                     f"👉 *APROBAR:* {link_aprobar}\n\n"
                     f"👉 *RECHAZAR:* {link_rechazar}"
                 )
-                enviar_whatsapp(ADMIN_PHONE, txt_admin)
+                # Se envía al admin incluyendo el JID en mentioned para que también su mención quede interactiva
+                enviar_whatsapp(ADMIN_PHONE, txt_admin, mencion_jid=sender_full_jid)
 
             return jsonify({"status": "success"}), 200
 
