@@ -21,7 +21,7 @@ WHATSAPP_ADMIN_PHONE = "5511948824359"
 WHATSAPP_ADMIN_CHAT_ID = f"{WHATSAPP_ADMIN_PHONE}@s.whatsapp.net"
 NUMERO_ADMIN_SEGURO = "48824359" 
 
-# 🤖 2. BOT ASISTENTE ENCARGADO (5562993984530)
+# 🤖 2. BOT ASISTENTE ENCARGADO
 BOT_ASISTENTE_PHONE = "5562993984530"
 
 # 🔑 CLAVE SECRETA DE ADMINISTRADOR
@@ -109,7 +109,6 @@ def generar_texto_lista():
 
 def enviar_mensaje_evolution(chat_id, texto, menciones=[]):
     url_envio = f"{SERVER_URL.rstrip('/')}/message/sendText/{INSTANCE_NAME}"
-    
     payload = {
         "number": chat_id,
         "text": texto
@@ -139,14 +138,12 @@ def webhook():
     try:
         data_webhook = request.get_json(silent=True)
         if not data_webhook:
-            # Por si acaso llega en formato form o texto plano
             data_webhook = request.form.to_dict()
 
         if not data_webhook:
             print("⚠️ Webhook recibido sin datos JSON legibles.")
             return "No data", 200
 
-        # REGISTRO CLAVE PARA VER QUÉ RECIBE RENDER
         print(f"📥 JSON RECIBIDO: {json.dumps(data_webhook, indent=2)}")
 
         event = data_webhook.get("event", "").lower()
@@ -171,9 +168,7 @@ def webhook():
             return "Ignored loop", 200
 
         remote_jid = data_msg.get("key", {}).get("remoteJid", "")
-        
         numero_persona = re.sub(r'\D', '', remote_jid.split("@")[0])
-        
         push_name = data_msg.get("pushName", "")
         nombre_usuario = push_name.strip() or f"+{numero_persona}"
 
@@ -183,7 +178,6 @@ def webhook():
         estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
         
         respuesta = ""
-
         es_admin_general = (NUMERO_ADMIN_SEGURO in numero_persona) or (WHATSAPP_ADMIN_PHONE in numero_persona)
 
         if comando == CLAVE_RESET:
