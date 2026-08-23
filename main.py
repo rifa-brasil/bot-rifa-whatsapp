@@ -200,6 +200,7 @@ async def handle_message(data):
             return
 
         remote_jid = event_data.get("key", {}).get("remoteJid", "")
+        participant_alt = event_data.get("key", {}).get("participantAlt", "")
         participant_jid = event_data.get("key", {}).get("participant", "")
         push_name = event_data.get("pushName", "Participante")
 
@@ -207,7 +208,13 @@ async def handle_message(data):
 
         if is_group:
             chat_id = remote_jid
-            sender_phone = participant_jid.split("@")[0] if participant_jid else remote_jid.split("@")[0]
+            # Priorizamos participantAlt para obtener el número real si viene por LID
+            if participant_alt:
+                sender_phone = participant_alt.split("@")[0]
+            elif participant_jid:
+                sender_phone = participant_jid.split("@")[0]
+            else:
+                sender_phone = remote_jid.split("@")[0]
         else:
             chat_id = remote_jid.split("@")[0]
             sender_phone = chat_id
@@ -399,7 +406,6 @@ async def handle_health(request):
 
 async def start_web_server():
     app = web.Application()
-    # Usamos la variable pero garantizamos el slash inicial por seguridad
     ruta_webhook = f"/{WEBHOOK_PATH.lstrip('/')}"
     app.router.add_post(ruta_webhook, handle_webhook)
     app.router.add_get("/", handle_health)
