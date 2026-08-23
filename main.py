@@ -12,11 +12,19 @@ EVOLUTION_API_URL = "https://mi-whatsapp-api-pobo.onrender.com"
 EVOLUTION_API_KEY = "55725d7c0b0fb17cb5e6564edac38c1f"
 INSTANCE_NAME = "mi-bot"
 ADMIN_PHONE = "5511948824359"  # Tu número de administrador
-BOT_PHONE = "5562993984530"   # Tu número de bot para armar los enlaces de aprobación
+BOT_PHONE = "5562993984530"   # Tu número de bot
 PORT = int(os.environ.get("PORT", 10000))
 
 DB_FILE = "rifa_db.json"
-PRECIO_POR_NUMERO = 10.0  # Precio base por número (ajustable)
+
+# --- TABLA DE PRECIOS Y PROMOCIONES POR CANTIDAD ---
+# Puedes ajustar los precios de los paquetes aquí según tu preferencia:
+PRECIO_1_NUMERO = 10.0
+PRECIO_2_NUMEROS = 18.0  # Paquete de 2
+PRECIO_3_NUMEROS = 25.0  # Paquete de 3
+PRECIO_4_NUMEROS = 32.0  # Paquete de 4
+PRECIO_5_NUMEROS = 40.0  # Paquete de 5
+# A partir de 5, cada número adicional suma el valor unitario base (PRECIO_1_NUMERO)
 
 def inicializar_rifa():
     try:
@@ -83,12 +91,24 @@ def enviar_whatsapp(numero, texto):
         return None
 
 def calcular_total_promocion(cantidad):
-    """Lógica de precios y promociones según la cantidad de números"""
-    total_sin_desc = cantidad * PRECIO_POR_NUMERO
-    if cantidad >= 5:
-        total_con_desc = total_sin_desc * 0.90  # 10% de descuento de ejemplo a partir de 5 números
-        return total_con_desc, "¡Aplicada promoción por volumen (-10%)!"
-    return total_sin_desc, ""
+    """Calcula el total según la cantidad exacta de números y sus paquetes"""
+    if cantidad <= 0:
+        return 0.0, "Sin números"
+    elif cantidad == 1:
+        return PRECIO_1_NUMERO, "Precio estándar (1 número)"
+    elif cantidad == 2:
+        return PRECIO_2_NUMEROS, "¡Promoción aplicada por 2 números!"
+    elif cantidad == 3:
+        return PRECIO_3_NUMEROS, "¡Promoción aplicada por 3 números!"
+    elif cantidad == 4:
+        return PRECIO_4_NUMEROS, "¡Promoción aplicada por 4 números!"
+    elif cantidad == 5:
+        return PRECIO_5_NUMEROS, "¡Promoción aplicada por 5 números (Súper Paquete)!"
+    else:
+        # Si juega más de 5, se toma el precio de 5 y los restantes se suman al precio base individual
+        adicionales = cantidad - 5
+        total = PRECIO_5_NUMEROS + (adicionales * PRECIO_1_NUMERO)
+        return total, f"¡Paquete de 5 + {adicionales} número(s) adicional(es)!"
 
 def generar_texto_lista():
     data = obtener_data_completa()
@@ -191,7 +211,7 @@ def webhook():
                 estado = info_num.get("estado")
 
                 if estado != "ocupado":
-                    enviar_whatsapp(sender_id, f"⚠️ El número *{num_ingresado.zfill(2)}* não está ocupado.")
+                    enviar_whatsapp(sender_id, f"⚠️ El número *{num_ingresado.zfill(2)}* no está ocupado.")
                     return jsonify({"status": "success"}), 200
 
                 ganador_nombre = info_num.get("nombre")
@@ -263,15 +283,13 @@ def webhook():
                             f"¡Muchas felicidades y gracias por participar! 🤝"
                         )
 
-                        # Enviar notificación tanto al chat de origen (grupo/privado) como obligatoriamente al privado del usuario
+                        # Enviar notificación al chat de origen y obligatoriamente al privado del usuario
                         try:
                             enviar_whatsapp(chat_origen, texto_pago_confirmado)
-                            if chat_origen != user_tel:
-                                enviar_whatsapp(user_tel, texto_pago_confirmado)
-                            else:
+                            if chat_origen != f"{user_tel}@s.whatsapp.net" and chat_origen != user_tel:
                                 enviar_whatsapp(user_tel, texto_pago_confirmado)
                         except Exception as e:
-                            print(f"Error notificando aprobación: {e}")
+                            print(f"Error notificando aprobación al grupo/privado: {e}")
 
                     elif accion == "rech":
                         for n in user_nums:
@@ -381,25 +399,22 @@ def webhook():
                 
                 msg_cliente += f"\nPor favor, realice su transferencia y envíe su comprobante."
 
-                # Enviar al chat donde se hizo la solicitud (grupo o privado)
                 enviar_whatsapp(remote_jid, msg_cliente)
 
-                # Generar enlaces clickeables de WhatsApp (wa.me) para que el admin solo tenga que pulsar 'APROBAR' o 'RECHAZAR' en azul
+                # Enlaces directos reales limpios en azul para WhatsApp
+                link_chat_usuario = f"https://wa.me/{sender_id}"
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
-
-                # Enlace interactivo en formato de texto plano con enlace universal para abrir chat privado del usuario directamente
-                link_usuario_privado = f"https://wa.me/{sender_id}"
 
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                     f"👤 *Cliente:* {push_name}\n"
-                    f"📱 *Chat Privado del Usuario:* {link_usuario_privado}\n"
-                    f"🎟️ *Números:* *{nums_solicitados_txt}*\n"
+                    f"📱 *Abrir chat del usuario:* {link_chat_usuario}\n"
+                    f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
-                    f"Haz clic para gestionar:\n\n"
-                    f"👉 *[ APROBAR ]*({link_aprobar})\n\n"
-                    f"👉 *[ RECHAZAR ]*({link_rechazar})"
+                    f"Haz clic para gestionar:\n"
+                    f"👉 *APROBAR:* {link_aprobar}\n\n"
+                    f"👉 *RECHAZAR:* {link_rechazar}"
                 )
                 enviar_whatsapp(ADMIN_PHONE, txt_admin)
 
