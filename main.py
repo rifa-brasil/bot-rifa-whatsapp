@@ -128,7 +128,8 @@ def generar_texto_lista():
             texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
             nombre = info.get("nombre", "Usuario")
-            texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
+            # Mostramos el nombre con formato de arroba en la lista también
+            texto += f"🔴 *{num_str}*: @{nombre}\n"
             
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     if data.get("estado_rifa") == "finalizada":
@@ -214,7 +215,7 @@ def webhook():
                 estado = info_num.get("estado")
 
                 if estado != "ocupado":
-                    enviar_whatsapp(sender_id, f"⚠️ El número *{num_ingresado.zfill(2)}* não está ocupado.")
+                    enviar_whatsapp(sender_id, f"⚠️ El número *{num_ingresado.zfill(2)}* no está ocupado.")
                     return jsonify({"status": "success"}), 200
 
                 ganador_nombre = info_num.get("nombre")
@@ -224,7 +225,7 @@ def webhook():
                 msg_anuncio = (
                     f"🏆 *¡RESULTADO OFICIAL DE GRAN SORTEO 100!* 🏆\n\n"
                     f"🎯 El Resultado de la Florida Pick 3 es el: *{num_formateado}*\n\n"
-                    f"🎉 ¡El usuario @{ganador_tel} es el ganador de este número! Muchas felicidades. 🥳"
+                    f"🎉 ¡El usuario @{ganador_nombre} es el ganador de este número! Muchas felicidades. 🥳"
                 )
                 enviar_whatsapp(remote_jid, msg_anuncio, mencion_jid=ganador_tel)
                 return jsonify({"status": "success"}), 200
@@ -277,11 +278,11 @@ def webhook():
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
-                        # 2. Mensaje al grupo de origen CON LA MENCIÓN EN VERDE USANDO @user_tel
+                        # 2. Mensaje al grupo de origen CON EL NOMBRE REAL EN VERDE USANDO @user_nombre
                         try:
                             if chat_origen != user_tel:
                                 texto_pago_grupo = (
-                                    f"🎉 *¡Hola @{user_tel}!* 🎉\n\n"
+                                    f"🎉 *¡Hola @{user_nombre}!* 🎉\n\n"
                                     f"Tu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre."
                                 )
                                 enviar_whatsapp(chat_origen, texto_pago_grupo, mencion_jid=user_tel)
@@ -384,10 +385,10 @@ def webhook():
                 cantidad_nums = len(validos_para_reservar)
                 total_a_pagar, promo_txt = calcular_total_promocion(cantidad_nums)
 
-                # 1. Mensaje de Solicitud Recibida al grupo (con mención en verde)
+                # 1. Mensaje de Solicitud Recibida al grupo (con @push_name y mencionado con sender_id)
                 msg_cliente = (
                     f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
-                    f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
+                    f"Hola @{push_name}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
                     f"💰 *Total a transferir:* ${total_a_pagar:.2f}\n"
                 )
                 if promo_txt:
@@ -396,13 +397,13 @@ def webhook():
                 msg_cliente += f"\n🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu pago."
                 enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_full_jid)
 
-                # 2. Mensaje para el administrador TAMBIÉN CON LA MENCIÓN EN VERDE usando @sender_id
+                # 2. Mensaje para el administrador con @push_name en verde y mencionado con sender_id
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
 
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* @{sender_id}\n"
+                    f"👤 *Cliente:* @{push_name}\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
