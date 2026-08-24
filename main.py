@@ -129,7 +129,13 @@ def generar_texto_lista():
             texto += f"🟢 *{num_str}*: Disponible\n"
             disponibles += 1
         elif estado == "pendiente":
-            texto += f"🟡 *{num_str}*: En verificación de pago...\n"
+            user_id = info.get("user_id", "")
+            jid_completo = info.get("jid_completo", "")
+            if user_id and jid_completo:
+                texto += f"🟡 *{num_str}*: En verificación de pago (@{user_id})...\n"
+                menciones_lista.append(jid_completo)
+            else:
+                texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
             user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
@@ -397,6 +403,8 @@ def webhook():
 
                 for n in validos_para_reservar:
                     rifa[n]["estado"] = "pendiente"
+                    rifa[n]["user_id"] = sender_id
+                    rifa[n]["jid_completo"] = sender_full_jid
 
                 solicitudes[req_id] = {
                     "nombre": push_name,
