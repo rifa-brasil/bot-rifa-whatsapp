@@ -194,7 +194,7 @@ def webhook():
 
         sender_id = sender_full_jid.split("@")[0].split(":")[0]
 
-        # Extracción robusta de texto para capturar comandos en grupos sin fallar
+        # Extracción robusta de texto para capturar comandos en grupos
         message_content = msg_data.get("message", {})
         mensaje_texto = ""
         
@@ -361,8 +361,9 @@ def webhook():
 
                 return jsonify({"status": "success"}), 200
 
-        # --- COMANDOS GENERALES Y CONSULTAS ---
-        if comando in ["hola", "buenas", "lista", "inicio", "rifa", "sorteo"]:
+        # --- COMANDOS GENERALES Y CONSULTAS (A prueba de espacios y variantes) ---
+        limpio_cmd = comando.strip()
+        if any(palabra in limpio_cmd for palabra in ["lista", "sorteo", "rifa", "inicio", "hola", "buenas"]):
             texto_lista, menciones_lista = generar_texto_lista()
             respuesta = f"¡Hola {push_name}! Estado actual de Gran Sorteo 100:\n\n{texto_lista}"
             if estado_actual_rifa == "activa":
@@ -371,7 +372,7 @@ def webhook():
             enviar_whatsapp(remote_jid, respuesta, mencion_jid=menciones_lista if menciones_lista else None)
             return jsonify({"status": "success"}), 200
 
-        elif comando == "/reglas":
+        elif "/reglas" in limpio_cmd or "reglas" in limpio_cmd:
             texto_reglas = (
                 f"📌 *Reglas de Gran Sorteo 100:*\n"
                 f"1. Escribe `lista` para ver los números disponibles (del 01 al 100).\n"
@@ -461,7 +462,7 @@ def webhook():
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
 
-                # Notificación corregida para que el Admin vea el Nombre del usuario (push_name) y su teléfono
+                # Notificación para el Admin con el nombre de usuario y su teléfono
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                     f"👤 *Cliente:* {push_name} (@{sender_id})\n"
