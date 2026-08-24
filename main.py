@@ -403,6 +403,7 @@ def webhook():
 
                 for n in validos_para_reservar:
                     rifa[n]["estado"] = "pendiente"
+                    rifa[n]["nombre"] = push_name
                     rifa[n]["user_id"] = sender_id
                     rifa[n]["jid_completo"] = sender_full_jid
 
