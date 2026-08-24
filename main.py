@@ -194,12 +194,22 @@ def webhook():
 
         sender_id = sender_full_jid.split("@")[0].split(":")[0]
 
+        # Extracción robusta de texto para capturar comandos en grupos sin fallar
         message_content = msg_data.get("message", {})
         mensaje_texto = ""
+        
         if "conversation" in message_content:
             mensaje_texto = message_content["conversation"]
         elif "extendedTextMessage" in message_content:
             mensaje_texto = message_content["extendedTextMessage"].get("text", "")
+        elif "imageMessage" in message_content:
+            mensaje_texto = message_content["imageMessage"].get("caption", "")
+        elif "videoMessage" in message_content:
+            mensaje_texto = message_content["videoMessage"].get("caption", "")
+        elif "buttonsResponseMessage" in message_content:
+            mensaje_texto = message_content["buttonsResponseMessage"].get("selectedButtonId", "")
+        elif "listResponseMessage" in message_content:
+            mensaje_texto = message_content["listResponseMessage"].get("title", "")
 
         if not mensaje_texto:
             return jsonify({"status": "no_text"}), 200
@@ -209,7 +219,7 @@ def webhook():
         push_name = msg_data.get("pushName", "Usuario")
 
         # LOG de depuración para ver quién interactúa y desde dónde
-        print(f"DEBUG -> Remote JID: {remote_jid} | Sender Full JID: {sender_full_jid} | Sender ID: {sender_id} | Msg: {mensaje_texto}")
+        print(f"DEBUG -> Remote JID: {remote_jid} | Sender Full JID: {sender_full_jid} | Sender ID: {sender_id} | PushName: {push_name} | Msg: {mensaje_texto}")
 
         data_rifa = obtener_data_completa()
         rifa = data_rifa["numeros"]
@@ -451,9 +461,10 @@ def webhook():
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
 
+                # Notificación corregida para que el Admin vea el Nombre del usuario (push_name) y su teléfono
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* @{sender_id}\n"
+                    f"👤 *Cliente:* {push_name} (@{sender_id})\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
