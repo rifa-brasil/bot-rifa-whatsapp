@@ -129,13 +129,7 @@ def generar_texto_lista():
             texto += f"🟢 *{num_str}*: Disponible\n"
             disponibles += 1
         elif estado == "pendiente":
-            user_id = info.get("user_id", "")
-            jid_completo = info.get("jid_completo", "")
-            if user_id and jid_completo:
-                texto += f"🟡 *{num_str}*: En verificación de pago (@{user_id})...\n"
-                menciones_lista.append(jid_completo)
-            else:
-                texto += f"🟡 *{num_str}*: En verificación de pago...\n"
+            texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
             user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
@@ -266,7 +260,7 @@ def webhook():
                         enviar_whatsapp(sender_id, f"🟢 El número {n_str.zfill(2)} ha sido liberado.")
                 return jsonify({"status": "success"}), 200
 
-            elif comando.startswith("conf_") or comando.startswith("rech_"):
+            if comando.startswith("conf_") or comando.startswith("rech_"):
                 partes_cb = comando.split("_", 1)
                 accion = partes_cb[0]
                 req_id = partes_cb[1] if len(partes_cb) > 1 else ""
@@ -303,7 +297,7 @@ def webhook():
                         )
 
                         try:
-                            enviar_whatsapp(user_tel, texto_pago_confirmado, mencion_jid=jid_completo)
+                            enviar_whatsapp(user_tel, texto_pago_confirmado)
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
@@ -323,18 +317,10 @@ def webhook():
                         guardar_data_completa(data_rifa)
                         enviar_whatsapp(sender_id, f"❌ *Rechazado el ID {req_id}.*")
                         
-                        texto_rechazo = f"❌ Lo sentimos @{user_tel}, tu solicitud para los números *{nums_formatted}* fue rechazada. Los números vuelven a estar disponibles."
-                        
                         try:
-                            enviar_whatsapp(user_tel, texto_rechazo, mencion_jid=jid_completo)
+                            enviar_whatsapp(user_tel, f"❌ Tu solicitud para los números *{nums_formatted}* fue rechazada y liberada.")
                         except Exception as e:
-                            print(f"Error notificando rechazo al privado: {e}")
-
-                        try:
-                            if chat_origen != user_tel:
-                                enviar_whatsapp(chat_origen, texto_rechazo, mencion_jid=jid_completo)
-                        except Exception as e:
-                            print(f"Error notificando rechazo al grupo: {e}")
+                            print(f"Error notificando rechazo: {e}")
 
                 return jsonify({"status": "success"}), 200
 
@@ -348,7 +334,7 @@ def webhook():
             enviar_whatsapp(remote_jid, respuesta, mencion_jid=menciones_lista if menciones_lista else None)
             return jsonify({"status": "success"}), 200
 
-        elif comando == "/reglas":
+        if comando == "/reglas":
             texto_reglas = (
                 f"📌 *Reglas de Gran Sorteo 100:*\n"
                 f"1. Escribe `lista` para ver los números disponibles (del 01 al 100).\n"
@@ -403,9 +389,6 @@ def webhook():
 
                 for n in validos_para_reservar:
                     rifa[n]["estado"] = "pendiente"
-                    rifa[n]["nombre"] = push_name
-                    rifa[n]["user_id"] = sender_id
-                    rifa[n]["jid_completo"] = sender_full_jid
 
                 solicitudes[req_id] = {
                     "nombre": push_name,
@@ -451,8 +434,6 @@ def webhook():
                 enviar_whatsapp(ADMIN_PHONE, txt_admin, mencion_jid=sender_full_jid)
 
             return jsonify({"status": "success"}), 200
-
-        return jsonify({"status": "ignored_text"}), 200
 
     except Exception as e:
         print(f"Error procesando webhook: {e}")
