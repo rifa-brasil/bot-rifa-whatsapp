@@ -116,7 +116,7 @@ def calcular_total_promocion(cantidad):
 def generar_texto_lista():
     data = obtener_data_completa()
     rifa = data["numeros"]
-    texto = "🎟️ *LISTA OFICIAL DE GRAN SORTEO 100* 🎟️\n\n"
+    texto = "🎟️ *LISTA OFICIAL DE LA RIFA* 🎟️\n\n"
     disponibles = 0
     menciones_lista = []
     
@@ -148,12 +148,12 @@ def generar_texto_lista():
             
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     if data.get("estado_rifa") == "finalizada":
-        texto += "\n\n🔒 *ESTADO:* Sorteo cerrado/finalizado."
+        texto += "\n\n🔒 *ESTADO:* RIFA cerrada/finalizada."
     return texto, menciones_lista
 
 @app.route("/", methods=["GET"])
 def index():
-    return "Bot de Gran Sorteo 100 para WhatsApp Activo y en Línea 24/7!", 200
+    return "Bot de LA RIFA para WhatsApp Activo y en Línea 24/7!", 200
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -212,7 +212,7 @@ def webhook():
             if comando.startswith("/reset"):
                 borrar_y_recrear_base_datos()
                 texto_lista, _ = generar_texto_lista()
-                enviar_whatsapp(sender_id, "🔄 *¡Gran Sorteo 100 ha sido reseteado con éxito!* Todos los números vuelven a estar disponibles.\n\n" + texto_lista)
+                enviar_whatsapp(sender_id, "🔄 *¡LA RIFA ha sido reseteado con éxito!* Todos los números vuelven a estar disponibles.\n\n" + texto_lista)
                 return jsonify({"status": "success"}), 200
 
             elif comando.startswith("/ganador"):
@@ -239,7 +239,7 @@ def webhook():
                 num_formateado = num_str.zfill(2)
 
                 msg_anuncio = (
-                    f"🏆 *¡RESULTADO OFICIAL DE GRAN SORTEO 100!* 🏆\n\n"
+                    f"🏆 *¡RESULTADO OFICIAL DE LA RIFA!* 🏆\n\n"
                     f"🎯 El Resultado de la Florida Pick 3 es el: *{num_formateado}*\n\n"
                     f"🎉 ¡El usuario @{ganador_tel} es el ganador de este número! Muchas felicidades. 🥳"
                 )
@@ -248,7 +248,7 @@ def webhook():
                 if ganador_jid:
                     msg_privado = (
                         f"🎉 *¡FELICIDADES!* 🎉\n\n"
-                        f"¡Has ganado Gran Sorteo 100 con tu número *{num_formateado}*! 🏆\n\n"
+                        f"¡Has ganado LA RIFA con tu número *{num_formateado}*! 🏆\n\n"
                         f"Por favor, ponte en contacto con la administración para recibir tu premio. 🤝"
                     )
                     enviar_whatsapp(ganador_tel, msg_privado)
@@ -339,9 +339,9 @@ def webhook():
                 return jsonify({"status": "success"}), 200
 
         # --- COMANDOS GENERALES Y CONSULTAS ---
-        if comando in ["hola", "buenas", "lista", "inicio", "rifa", "sorteo"]:
+        if comando in ["lista"]:
             texto_lista, menciones_lista = generar_texto_lista()
-            respuesta = f"¡Hola {push_name}! Estado actual de Gran Sorteo 100:\n\n{texto_lista}"
+            respuesta = f"¡Hola {push_name}! Estado actual de LA RIFA:\n\n{texto_lista}"
             if estado_actual_rifa == "activa":
                 respuesta += "\n\n👉 *¿Cómo comprar?* Envía los números que deseas separados por coma (ej: *7, 14*)."
             
@@ -350,7 +350,7 @@ def webhook():
 
         elif comando == "/reglas":
             texto_reglas = (
-                f"📌 *Reglas de Gran Sorteo 100:*\n"
+                f"📌 *Reglas de LA RIFA:*\n"
                 f"1. Escribe `lista` para ver los números disponibles (del 01 al 100).\n"
                 f"2. Envía los números que deseas separados por comas (ejemplo: `7, 14`).\n"
                 f"3. Revisa el total calculado con promoción y haz tu transferencia.\n"
