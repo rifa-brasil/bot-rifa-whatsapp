@@ -297,7 +297,7 @@ def webhook():
                         )
 
                         try:
-                            enviar_whatsapp(user_tel, texto_pago_confirmado)
+                            enviar_whatsapp(user_tel, texto_pago_confirmado, mencion_jid=jid_completo)
                         except Exception as e:
                             print(f"Error enviando confirmación al privado: {e}")
 
@@ -320,7 +320,7 @@ def webhook():
                         texto_rechazo = f"❌ Lo sentimos @{user_tel}, tu solicitud para los números *{nums_formatted}* fue rechazada. Los números vuelven a estar disponibles."
                         
                         try:
-                            enviar_whatsapp(user_tel, texto_rechazo)
+                            enviar_whatsapp(user_tel, texto_rechazo, mencion_jid=jid_completo)
                         except Exception as e:
                             print(f"Error notificando rechazo al privado: {e}")
 
