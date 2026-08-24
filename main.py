@@ -386,16 +386,18 @@ def webhook():
                 else:
                     invalidos.append(p)
 
+            # Si hay conflictos (números ya ocupados, pendientes o inválidos), se lo avisamos claramente al usuario
             mensajes_conflicto = []
             if ocupados:
-                mensajes_conflicto.append(f"🔴 El/los número(s) {', '.join(ocupados)} ya está(n) *OCUPADO(S)*.")
+                mensajes_conflicto.append(f"🔴 El/los número(s) {', '.join(ocupados)} ya está(n) *OCUPADO(S)* por otro usuario.")
             if pendientes:
-                mensajes_conflicto.append(f"🟡 El/los número(s) {', '.join(pendientes)} está(n) *EN PROCESO DE VERIFICACIÓN*.")
+                mensajes_conflicto.append(f"🟡 El/los número(s) {', '.join(pendientes)} está(n) *EN PROCESO DE VERIFICACIÓN* de pago.")
             if invalidos:
-                mensajes_conflicto.append(f"⚠️ El/los número(s) {', '.join(invalidos)} está(n) fuera del rango (1 al 100).")
+                mensajes_conflicto.append(f"⚠️ El/los número(s) {', '.join(invalidos)} están fuera del rango (1 al 100).")
 
-            if mensajes_conflicto and not validos_para_reservar:
-                enviar_whatsapp(remote_jid, f"Hola {push_name}:\n" + "\n".join(mensajes_conflicto))
+            if mensajes_conflicto:
+                aviso_conflicto = f"Hola @{sender_id}, tu solicitud no pudo completarse por lo siguiente:\n\n" + "\n".join(mensajes_conflicto) + "\n\n💡 *Por favor, revisa la lista y elige otros números disponibles.*"
+                enviar_whatsapp(remote_jid, aviso_conflicto, mencion_jid=sender_full_jid)
                 return jsonify({"status": "success"}), 200
 
             if validos_para_reservar:
@@ -438,6 +440,7 @@ def webhook():
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
 
+                # Aquí incluimos correctamente el @sender_id para que el admin vea al usuario interactivo
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                     f"👤 *Cliente:* @{sender_id}\n"
