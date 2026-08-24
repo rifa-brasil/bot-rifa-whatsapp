@@ -1,7 +1,6 @@
 import os
 import json
 import uuid
-import time
 import requests
 from flask import Flask, request, jsonify
 
@@ -49,36 +48,27 @@ def borrar_y_recrear_base_datos():
 
 def obtener_data_completa():
     inicializar_rifa()
-    # Reintentos para evitar bloqueos por concurrencia en disco
-    for _ in range(3):
-        try:
-            with open(DB_FILE, "r") as f:
-                data = json.load(f)
-                if "estado_rifa" not in data:
-                    data["estado_rifa"] = "activa"
-                if "solicitudes_pendientes" not in data:
-                    data["solicitudes_pendientes"] = {}
-                if "usuarios_bloqueados" not in data:
-                    data["usuarios_bloqueados"] = []
-                return data
-        except Exception as e:
-            print(f"Reintentando lectura de BD debido a: {e}")
-            time.sleep(0.1)
-    
-    # Si falla tras reintentos, recrea por seguridad
-    borrar_y_recrear_base_datos()
-    with open(DB_FILE, "r") as f:
-        return json.load(f)
+    try:
+        with open(DB_FILE, "r") as f:
+            data = json.load(f)
+            if "estado_rifa" not in data:
+                data["estado_rifa"] = "activa"
+            if "solicitudes_pendientes" not in data:
+                data["solicitudes_pendientes"] = {}
+            if "usuarios_bloqueados" not in data:
+                data["usuarios_bloqueados"] = []
+            return data
+    except Exception as e:
+        borrar_y_recrear_base_datos()
+        with open(DB_FILE, "r") as f:
+            return json.load(f)
 
 def guardar_data_completa(data):
-    for _ in range(3):
-        try:
-            with open(DB_FILE, "w") as f:
-                json.dump(data, f, indent=4)
-            return
-        except Exception as e:
-            print(f"Reintentando guardado de BD debido a: {e}")
-            time.sleep(0.1)
+    try:
+        with open(DB_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"Error al guardar JSON: {e}")
 
 def enviar_whatsapp(numero, texto, mencion_jid=None):
     url = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
@@ -159,7 +149,7 @@ def generar_texto_lista():
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     if data.get("estado_rifa") == "finalizada":
         texto += "\n\n🔒 *ESTADO:* Sorteo cerrado/finalizado."
-    return texto, mencions_lista
+    return texto, menciones_lista
 
 @app.route("/", methods=["GET"])
 def index():
@@ -194,22 +184,12 @@ def webhook():
 
         sender_id = sender_full_jid.split("@")[0].split(":")[0]
 
-        # Extracción robusta de texto para capturar comandos en grupos
         message_content = msg_data.get("message", {})
         mensaje_texto = ""
-        
         if "conversation" in message_content:
             mensaje_texto = message_content["conversation"]
         elif "extendedTextMessage" in message_content:
             mensaje_texto = message_content["extendedTextMessage"].get("text", "")
-        elif "imageMessage" in message_content:
-            mensaje_texto = message_content["imageMessage"].get("caption", "")
-        elif "videoMessage" in message_content:
-            mensaje_texto = message_content["videoMessage"].get("caption", "")
-        elif "buttonsResponseMessage" in message_content:
-            mensaje_texto = message_content["buttonsResponseMessage"].get("selectedButtonId", "")
-        elif "listResponseMessage" in message_content:
-            mensaje_texto = message_content["listResponseMessage"].get("title", "")
 
         if not mensaje_texto:
             return jsonify({"status": "no_text"}), 200
@@ -217,9 +197,6 @@ def webhook():
         mensaje_texto = mensaje_texto.strip()
         comando = mensaje_texto.lower()
         push_name = msg_data.get("pushName", "Usuario")
-
-        # LOG de depuración para ver quién interactúa y desde dónde
-        print(f"DEBUG -> Remote JID: {remote_jid} | Sender Full JID: {sender_full_jid} | Sender ID: {sender_id} | PushName: {push_name} | Msg: {mensaje_texto}")
 
         data_rifa = obtener_data_completa()
         rifa = data_rifa["numeros"]
@@ -361,9 +338,8 @@ def webhook():
 
                 return jsonify({"status": "success"}), 200
 
-        # --- COMANDOS GENERALES Y CONSULTAS (A prueba de espacios y variantes) ---
-        limpio_cmd = comando.strip()
-        if any(palabra in limpio_cmd for palabra in ["lista", "sorteo", "rifa", "inicio", "hola", "buenas"]):
+        # --- COMANDOS GENERALES Y CONSULTAS ---
+        if comando in ["hola", "buenas", "lista", "inicio", "rifa", "sorteo"]:
             texto_lista, menciones_lista = generar_texto_lista()
             respuesta = f"¡Hola {push_name}! Estado actual de Gran Sorteo 100:\n\n{texto_lista}"
             if estado_actual_rifa == "activa":
@@ -372,7 +348,7 @@ def webhook():
             enviar_whatsapp(remote_jid, respuesta, mencion_jid=menciones_lista if menciones_lista else None)
             return jsonify({"status": "success"}), 200
 
-        elif "/reglas" in limpio_cmd or "reglas" in limpio_cmd:
+        elif comando == "/reglas":
             texto_reglas = (
                 f"📌 *Reglas de Gran Sorteo 100:*\n"
                 f"1. Escribe `lista` para ver los números disponibles (del 01 al 100).\n"
@@ -462,7 +438,6 @@ def webhook():
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
 
-                # Notificación para el Admin con el nombre de usuario y su teléfono
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                     f"👤 *Cliente:* {push_name} (@{sender_id})\n"
