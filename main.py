@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import time
 import requests
 from flask import Flask, request, jsonify
 
@@ -48,27 +49,36 @@ def borrar_y_recrear_base_datos():
 
 def obtener_data_completa():
     inicializar_rifa()
-    try:
-        with open(DB_FILE, "r") as f:
-            data = json.load(f)
-            if "estado_rifa" not in data:
-                data["estado_rifa"] = "activa"
-            if "solicitudes_pendientes" not in data:
-                data["solicitudes_pendientes"] = {}
-            if "usuarios_bloqueados" not in data:
-                data["usuarios_bloqueados"] = []
-            return data
-    except Exception as e:
-        borrar_y_recrear_base_datos()
-        with open(DB_FILE, "r") as f:
-            return json.load(f)
+    # Reintentos para evitar bloqueos por concurrencia en disco
+    for _ in range(3):
+        try:
+            with open(DB_FILE, "r") as f:
+                data = json.load(f)
+                if "estado_rifa" not in data:
+                    data["estado_rifa"] = "activa"
+                if "solicitudes_pendientes" not in data:
+                    data["solicitudes_pendientes"] = {}
+                if "usuarios_bloqueados" not in data:
+                    data["usuarios_bloqueados"] = []
+                return data
+        except Exception as e:
+            print(f"Reintentando lectura de BD debido a: {e}")
+            time.sleep(0.1)
+    
+    # Si falla tras reintentos, recrea por seguridad
+    borrar_y_recrear_base_datos()
+    with open(DB_FILE, "r") as f:
+        return json.load(f)
 
 def guardar_data_completa(data):
-    try:
-        with open(DB_FILE, "w") as f:
-            json.dump(data, f, indent=4)
-    except Exception as e:
-        print(f"Error al guardar JSON: {e}")
+    for _ in range(3):
+        try:
+            with open(DB_FILE, "w") as f:
+                json.dump(data, f, indent=4)
+            return
+        except Exception as e:
+            print(f"Reintentando guardado de BD debido a: {e}")
+            time.sleep(0.1)
 
 def enviar_whatsapp(numero, texto, mencion_jid=None):
     url = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
@@ -149,7 +159,7 @@ def generar_texto_lista():
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     if data.get("estado_rifa") == "finalizada":
         texto += "\n\n🔒 *ESTADO:* Sorteo cerrado/finalizado."
-    return texto, menciones_lista
+    return texto, mencions_lista
 
 @app.route("/", methods=["GET"])
 def index():
@@ -197,6 +207,9 @@ def webhook():
         mensaje_texto = mensaje_texto.strip()
         comando = mensaje_texto.lower()
         push_name = msg_data.get("pushName", "Usuario")
+
+        # LOG de depuración para ver quién interactúa y desde dónde
+        print(f"DEBUG -> Remote JID: {remote_jid} | Sender Full JID: {sender_full_jid} | Sender ID: {sender_id} | Msg: {mensaje_texto}")
 
         data_rifa = obtener_data_completa()
         rifa = data_rifa["numeros"]
@@ -440,7 +453,7 @@ def webhook():
 
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* @{sender_id}"
+                    f"👤 *Cliente:* @{sender_id}\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
