@@ -90,7 +90,6 @@ def enviar_whatsapp(numero, texto, mencion_jid=None):
 
     try:
         response = requests.post(url, json=payload, headers=headers)
-        print(f"Respuesta de envío WhatsApp: {response.text}")
         return response.json()
     except Exception as e:
         print(f"Error enviando WhatsApp a {numero}: {e}")
@@ -132,17 +131,23 @@ def generar_texto_lista():
         elif estado == "pendiente":
             user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
-            if user_id and jid_completo:
+            if user_id:
                 texto += f"🟡 *{num_str}*: En verificación de pago (@{user_id})...\n"
-                menciones_lista.append(jid_completo)
+                if jid_completo:
+                    menciones_lista.append(jid_completo)
+                else:
+                    menciones_lista.append(f"{user_id}@s.whatsapp.net")
             else:
                 texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
             user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
-            if user_id and jid_completo:
+            if user_id:
                 texto += f"🔴 *{num_str}*: Ocupado por @{user_id}\n"
-                menciones_lista.append(jid_completo)
+                if jid_completo:
+                    menciones_lista.append(jid_completo)
+                else:
+                    menciones_lista.append(f"{user_id}@s.whatsapp.net")
             else:
                 nombre = info.get("nombre", "Usuario")
                 texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
@@ -150,7 +155,7 @@ def generar_texto_lista():
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     if data.get("estado_rifa") == "finalizada":
         texto += "\n\n🔒 *ESTADO:* RIFA cerrada/finalizada."
-    return texto, menciones_lista
+    return texto, list(set(menciones_lista))
 
 @app.route("/", methods=["GET"])
 def index():
@@ -163,20 +168,15 @@ def webhook():
         return jsonify({"status": "error"}), 400
 
     try:
-        # --- IMPRESIÓN DE DEPURACIÓN EN CONSOLA DE RENDER ---
-        print("=== NUEVO EVENTO RECIBIDO DE EVOLUTION API ===")
-        print(json.dumps(data, indent=2))
-
         event = data.get("event")
         if event != "messages.upsert":
             return jsonify({"status": "ignored"}), 200
 
         msg_data = data.get("data", {})
-        
         remote_jid = msg_data.get("key", {}).get("remoteJid", "")
         is_group = "@g.us" in remote_jid
         
-        # Extracción ultra simplificada y directa del remitente
+        # --- EXTRACCIÓN ROBUSTA DE JID Y REMITENTE ---
         sender_full_jid = ""
         if is_group:
             sender_full_jid = (
@@ -185,9 +185,7 @@ def webhook():
                 msg_data.get("key", {}).get("participant") or 
                 ""
             )
-            # Si viene en formato LID pero tenemos el número puro en otra parte, o extraemos dígitos
             if "@lid" in sender_full_jid:
-                # Intentamos extraer solo los números de teléfono si están embebidos o usar remoteJid si falla
                 digits = "".join(filter(str.isdigit, sender_full_jid))
                 if len(digits) > 10:
                     sender_full_jid = f"{digits}@s.whatsapp.net"
@@ -197,8 +195,11 @@ def webhook():
         if not sender_full_jid:
             sender_full_jid = remote_jid
 
+        # Si no tiene sufijo, se lo agregamos para asegurar que sea una mención válida de WhatsApp
+        if "@" not in sender_full_jid:
+            sender_full_jid = f"{sender_full_jid}@s.whatsapp.net"
+
         sender_id = sender_full_jid.split("@")[0].split(":")[0]
-        # Asegurar que solo queden números para el sender_id
         sender_id = "".join(filter(str.isdigit, sender_id))
 
         message_content = msg_data.get("message", {})
@@ -214,8 +215,6 @@ def webhook():
         mensaje_texto = mensaje_texto.strip()
         comando = mensaje_texto.lower()
         push_name = msg_data.get("pushName", "Usuario")
-
-        print(f"Mensaje procesado -> Texto: '{mensaje_texto}' | Remitente ID: {sender_id} | Grupo: {remote_jid}")
 
         data_rifa = obtener_data_completa()
         rifa = data_rifa["numeros"]
@@ -280,7 +279,7 @@ def webhook():
                         data_rifa["solicitudes_pendientes"] = solicitudes
                         guardar_data_completa(data_rifa)
                         
-                        enviar_whatsapp(admin_num:=ADMIN_PHONE, f"✅ Aprobado: {nums_formatted}")
+                        enviar_whatsapp(ADMIN_PHONE, f"✅ Aprobado: {nums_formatted}")
                         txt_conf = f"🎉 ¡Hola @{user_tel}! Tu pago fue verificado. Tus números ({nums_formatted}) ya están registrados."
                         enviar_whatsapp(chat_origen, txt_conf, mencion_jid=jid_completo)
 
