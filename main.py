@@ -174,25 +174,38 @@ def webhook():
         remote_jid = msg_data.get("key", {}).get("remoteJid", "")
         is_group = "@g.us" in remote_jid
         
+        # --- EXTRACCIÓN ROBUSTA DE PARTICIPANTE / JID ---
+        sender_full_jid = ""
         if is_group:
+            # Buscamos en todas las ubicaciones posibles donde Evolution API entrega el JID o Alt
             sender_full_jid = (
                 msg_data.get("participantAlt") or 
-                msg_data.get("participant", "") or 
-                msg_data.get("key", {}).get("participant", "")
+                msg_data.get("participant") or 
+                msg_data.get("key", {}).get("participant") or 
+                ""
             )
-            if "@lid" in sender_full_jid and msg_data.get("participantAlt"):
-                sender_full_jid = msg_data.get("participantAlt")
+            # Si el JID obtenido sigue conteniendo '@lid', intentamos forzar si hay otro campo o limpiar
+            if "@lid" in sender_full_jid:
+                alt = msg_data.get("participantAlt")
+                if alt and "@s.whatsapp.net" in alt:
+                    sender_full_jid = alt
         else:
             sender_full_jid = remote_jid
 
         if not sender_full_jid:
             sender_full_jid = remote_jid
 
+        # Limpieza definitiva del número telefónico (sender_id)
         if "@s.whatsapp.net" in sender_full_jid:
             sender_id = sender_full_jid.split("@")[0].split(":")[0]
-        elif "@lid" in sender_full_jid and msg_data.get("participantAlt"):
-            sender_id = msg_data.get("participantAlt").split("@")[0].split(":")[0]
-            sender_full_jid = msg_data.get("participantAlt")
+        elif "@lid" in sender_full_jid:
+            alt = msg_data.get("participantAlt")
+            if alt and "@s.whatsapp.net" in alt:
+                sender_full_jid = alt
+                sender_id = alt.split("@")[0].split(":")[0]
+            else:
+                # Si es puramente LID y no hay alt, extraemos los dígitos del LID por seguridad
+                sender_id = "".join(filter(str.isdigit, sender_full_jid.split("@")[0]))
         else:
             sender_id = sender_full_jid.split("@")[0].split(":")[0]
 
@@ -219,7 +232,7 @@ def webhook():
         if sender_id in bloqueados and sender_id != ADMIN_PHONE:
             return jsonify({"status": "blocked"}), 200
 
-        # --- COMANDOS GENERALES Y CONSULTAS (CON PRIORIDAD) ---
+        # --- 1. COMANDO LISTA CON PRIORIDAD ABSOLUTA (ANTES DE TODO) ---
         if comando in ["lista", "listas"]:
             texto_lista, menciones_lista = generar_texto_lista()
             respuesta = f"¡Hola {push_name}! Estado actual de LA RIFA:\n\n{texto_lista}"
@@ -229,7 +242,8 @@ def webhook():
             enviar_whatsapp(remote_jid, respuesta, mencion_jid=menciones_lista if menciones_lista else None)
             return jsonify({"status": "success"}), 200
 
-        elif comando in ["/reglas", "reglas"]:
+        # --- 2. REGLAS ---
+        if comando in ["/reglas", "reglas"]:
             texto_reglas = (
                 f"📌 *Reglas de LA RIFA:*\n"
                 f"1. Escribe `lista` para ver los números disponibles (del 01 al 100).\n"
@@ -240,7 +254,7 @@ def webhook():
             enviar_whatsapp(remote_jid, texto_reglas)
             return jsonify({"status": "success"}), 200
 
-        # --- COMANDOS DE ADMINISTRADOR ---
+        # --- 3. COMANDOS DE ADMINISTRADOR ---
         if sender_id == ADMIN_PHONE:
             if comando.startswith("/reset"):
                 borrar_y_recrear_base_datos()
@@ -371,7 +385,7 @@ def webhook():
  
                 return jsonify({"status": "success"}), 200
 
-        # --- PROCESAMIENTO DE SELECCIÓN DE NÚMEROS ---
+        # --- 4. PROCESAMIENTO DE SELECCIÓN DE NÚMEROS ---
         partes = [p.strip() for p in mensaje_texto.split(",")]
         es_lista_numeros = all(p.isdigit() for p in partes) if partes else False
 
