@@ -129,25 +129,19 @@ def generar_texto_lista():
             texto += f"🟢 *{num_str}*: Disponible\n"
             disponibles += 1
         elif estado == "pendiente":
-            user_id = info.get("user_telf", "")
+            user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
             if user_id:
-                texto += f"🟡 *{num_str}*: En verificación de pago (@{user_tel})...\n"
-                if jid_completo:
-                    menciones_lista.append(jid_completo)
-                else:
-                    menciones_lista.append(f"{user_telf}@s.whatsapp.net")
+                texto += f"🟡 *{num_str}*: En verificación de pago (@{user_id})...\n"
+                menciones_lista.append(jid_completo if jid_completo and "@s.whatsapp.net" in jid_completo else f"{user_id}@s.whatsapp.net")
             else:
                 texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
-            user_telf = info.get("user_telf", "")
+            user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
-            if user_telf:
-                texto += f"🔴 *{num_str}*: Ocupado por @{user_tel}\n"
-                if jid_completo:
-                    menciones_lista.append(jid_completo)
-                else:
-                    menciones_lista.append(f"{user_telf}@s.whatsapp.net")
+            if user_id:
+                texto += f"🔴 *{num_str}*: Ocupado por @{user_id}\n"
+                menciones_lista.append(jid_completo if jid_completo and "@s.whatsapp.net" in jid_completo else f"{user_id}@s.whatsapp.net")
             else:
                 nombre = info.get("nombre", "Usuario")
                 texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
@@ -176,31 +170,38 @@ def webhook():
         remote_jid = msg_data.get("key", {}).get("remoteJid", "")
         is_group = "@g.us" in remote_jid
         
-        # --- EXTRACCIÓN ROBUSTA DE JID Y REMITENTE ---
+        # --- EXTRACCIÓN Y LIMPIEZA ABSOLUTA DEL NÚMERO DE TELÉFONO REAL ---
         sender_full_jid = ""
         if is_group:
-            sender_full_jid = (
-                msg_data.get("participantAlt") or 
-                msg_data.get("participant") or 
-                msg_data.get("key", {}).get("participant") or 
-                ""
-            )
-            if "@lid" in sender_full_jid:
-                digits = "".join(filter(str.isdigit, sender_full_jid))
-                if len(digits) > 10:
+            # Revisamos participantAlt primero (suele traer el número real en @s.whatsapp.net)
+            alt = msg_data.get("participantAlt", "")
+            part = msg_data.get("participant", "")
+            key_part = msg_data.get("key", {}).get("participant", "")
+
+            if alt and "@s.whatsapp.net" in alt:
+                sender_full_jid = alt
+            elif part and "@s.whatsapp.net" in part:
+                sender_full_jid = part
+            elif key_part and "@s.whatsapp.net" in key_part:
+                sender_full_jid = key_part
+            else:
+                # Si todo viene con @lid, extraemos los dígitos que formen un número de teléfono válido (ej: >10 dígitos)
+                raw_id = alt or part or key_part or remote_jid
+                digits = "".join(filter(str.isdigit, raw_id))
+                if len(digits) >= 10:
                     sender_full_jid = f"{digits}@s.whatsapp.net"
+                else:
+                    sender_full_jid = raw_id
         else:
             sender_full_jid = remote_jid
 
-        if not sender_full_jid:
-            sender_full_jid = remote_jid
+        if not sender_full_jid or "@" not in sender_full_jid:
+            sender_full_jid = f"{remote_jid.split('@')[0]}@s.whatsapp.net"
 
-        # Si no tiene sufijo, se lo agregamos para asegurar que sea una mención válida de WhatsApp
-        if "@" not in sender_full_jid:
-            sender_full_jid = f"{sender_full_jid}@s.whatsapp.net"
-
+        # Extraer el ID limpio solo con los dígitos del teléfono
         sender_id = sender_full_jid.split("@")[0].split(":")[0]
         sender_id = "".join(filter(str.isdigit, sender_id))
+        sender_full_jid = f"{sender_id}@s.whatsapp.net"
 
         message_content = msg_data.get("message", {})
         mensaje_texto = ""
@@ -228,7 +229,7 @@ def webhook():
         # --- 1. COMANDO LISTA (PRIORIDAD ABSOLUTA) ---
         if comando in ["lista", "listas"]:
             texto_lista, menciones_lista = generar_texto_lista()
-            respuesta = f"¡Hola @{user_tel}! Estado actual de LA RIFA:\n\n{texto_lista}"
+            respuesta = f"¡Hola {push_name}! Estado actual de LA RIFA:\n\n{texto_lista}"
             if estado_actual_rifa == "activa":
                 respuesta += "\n\n👉 *¿Cómo comprar?* Envía los números que deseas separados por coma (ej: *7, 14*)."
             
@@ -338,12 +339,12 @@ def webhook():
                 nums_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
                 total, promo = calcular_total_promocion(len(validos_para_reservar))
 
-                msg = f"⏳ Hola @{user_tel}, recibimos tu pedido para: *{nums_txt}*.\n💰 Total: ${total:.2f}\n🟡 Quedan temporalmente reservados."
+                msg = f"⏳ Hola @{sender_id}, recibimos tu pedido para: *{nums_txt}*.\n💰 Total: ${total:.2f}\n🟡 Quedan temporalmente reservados."
                 enviar_whatsapp(remote_jid, msg, mencion_jid=sender_full_jid)
 
                 link_ok = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_no = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
-                txt_admin = f"📥 Solicitud `{req_id}` de @{user_tel} para *{nums_txt}* (${total:.2f}).\n👉 APROBAR: {link_ok}\n👉 RECHAZAR: {link_no}"
+                txt_admin = f"📥 Solicitud `{req_id}` de @{sender_id} para *{nums_txt}* (${total:.2f}).\n👉 APROBAR: {link_ok}\n👉 RECHAZAR: {link_no}"
                 enviar_whatsapp(ADMIN_PHONE, txt_admin, mencion_jid=sender_full_jid)
 
             return jsonify({"status": "success"}), 200
