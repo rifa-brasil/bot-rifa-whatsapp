@@ -338,7 +338,7 @@ def webhook():
  
                 return jsonify({"status": "success"}), 200
  
-        # --- COMANDOS GENERALES Y CONSULTAS (CORREGIDO PARA FUNCIONAR SIEMPRE) ---
+        # --- COMANDOS GENERALES Y CONSULTAS ---
         if comando in ["lista", "listas"]:
             texto_lista, menciones_lista = generar_texto_lista()
             respuesta = f"¡Hola {push_name}! Estado actual de LA RIFA:\n\n{texto_lista}"
@@ -353,8 +353,8 @@ def webhook():
                 f"📌 *Reglas de LA RIFA:*\n"
                 f"1. Escribe `lista` para ver los números disponibles (del 01 al 100).\n"
                 f"2. Envía los números que deseas separados por comas (ejemplo: `7, 14`).\n"
-                f"3. Revisa el total calculado con promoción, haz tu transferencia y envía comprobante al admin.\n"
-                f"4. El ganador se define mediante la Lotería de Florida en el resultado del Pick3."
+                f"3. Revisa el total calculado con promoción y haz tu transferencia.\n"
+                f"4. El ganador se define mediante la Lotería de Florida."
             )
             enviar_whatsapp(remote_jid, texto_reglas)
             return jsonify({"status": "success"}), 200
@@ -438,9 +438,10 @@ def webhook():
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
  
+                # --- AQUÍ ESTÁ EL CAMBIO SOLICITADO PARA EL ADMIN ---
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* @{user_tel (@{user_tel)\n"
+                    f"👤 *Cliente:* @{sender_id} ({push_name})\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
