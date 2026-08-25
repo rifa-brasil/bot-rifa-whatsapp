@@ -90,6 +90,7 @@ def enviar_whatsapp(numero, texto, mencion_jid=None):
 
     try:
         response = requests.post(url, json=payload, headers=headers)
+        print(f"Respuesta de envío WhatsApp: {response.text}")
         return response.json()
     except Exception as e:
         print(f"Error enviando WhatsApp a {numero}: {e}")
@@ -131,17 +132,17 @@ def generar_texto_lista():
         elif estado == "pendiente":
             user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
-            if user_id:
+            if user_id and jid_completo:
                 texto += f"🟡 *{num_str}*: En verificación de pago (@{user_id})...\n"
-                menciones_lista.append(jid_completo if jid_completo and "@s.whatsapp.net" in jid_completo else f"{user_id}@s.whatsapp.net")
+                menciones_lista.append(jid_completo)
             else:
                 texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
             user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
-            if user_id:
+            if user_id and jid_completo:
                 texto += f"🔴 *{num_str}*: Ocupado por @{user_id}\n"
-                menciones_lista.append(jid_completo if jid_completo and "@s.whatsapp.net" in jid_completo else f"{user_id}@s.whatsapp.net")
+                menciones_lista.append(jid_completo)
             else:
                 nombre = info.get("nombre", "Usuario")
                 texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
@@ -149,7 +150,7 @@ def generar_texto_lista():
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
     if data.get("estado_rifa") == "finalizada":
         texto += "\n\n🔒 *ESTADO:* RIFA cerrada/finalizada."
-    return texto, list(set(menciones_lista))
+    return texto, menciones_lista
 
 @app.route("/", methods=["GET"])
 def index():
@@ -162,46 +163,38 @@ def webhook():
         return jsonify({"status": "error"}), 400
 
     try:
+        print("=== NUEVO EVENTO RECIBIDO DE EVOLUTION API ===")
+        print(json.dumps(data, indent=2))
+
         event = data.get("event")
         if event != "messages.upsert":
             return jsonify({"status": "ignored"}), 200
 
         msg_data = data.get("data", {})
+        
         remote_jid = msg_data.get("key", {}).get("remoteJid", "")
         is_group = "@g.us" in remote_jid
         
-        # --- EXTRACCIÓN Y LIMPIEZA ABSOLUTA DEL NÚMERO DE TELÉFONO REAL ---
         sender_full_jid = ""
         if is_group:
-            # Revisamos participantAlt primero (suele traer el número real en @s.whatsapp.net)
-            alt = msg_data.get("participantAlt", "")
-            part = msg_data.get("participant", "")
-            key_part = msg_data.get("key", {}).get("participant", "")
-
-            if alt and "@s.whatsapp.net" in alt:
-                sender_full_jid = alt
-            elif part and "@s.whatsapp.net" in part:
-                sender_full_jid = part
-            elif key_part and "@s.whatsapp.net" in key_part:
-                sender_full_jid = key_part
-            else:
-                # Si todo viene con @lid, extraemos los dígitos que formen un número de teléfono válido (ej: >10 dígitos)
-                raw_id = alt or part or key_part or remote_jid
-                digits = "".join(filter(str.isdigit, raw_id))
-                if len(digits) >= 10:
+            sender_full_jid = (
+                msg_data.get("participantAlt") or 
+                msg_data.get("participant") or 
+                msg_data.get("key", {}).get("participant") or 
+                ""
+            )
+            if "@lid" in sender_full_jid:
+                digits = "".join(filter(str.isdigit, sender_full_jid))
+                if len(digits) > 10:
                     sender_full_jid = f"{digits}@s.whatsapp.net"
-                else:
-                    sender_full_jid = raw_id
         else:
             sender_full_jid = remote_jid
 
-        if not sender_full_jid or "@" not in sender_full_jid:
-            sender_full_jid = f"{remote_jid.split('@')[0]}@s.whatsapp.net"
+        if not sender_full_jid:
+            sender_full_jid = remote_jid
 
-        # Extraer el ID limpio solo con los dígitos del teléfono
         sender_id = sender_full_jid.split("@")[0].split(":")[0]
         sender_id = "".join(filter(str.isdigit, sender_id))
-        sender_full_jid = f"{sender_id}@s.whatsapp.net"
 
         message_content = msg_data.get("message", {})
         mensaje_texto = ""
@@ -217,6 +210,8 @@ def webhook():
         comando = mensaje_texto.lower()
         push_name = msg_data.get("pushName", "Usuario")
 
+        print(f"Mensaje procesado -> Texto: '{mensaje_texto}' | Remitente ID: {sender_id} | Grupo: {remote_jid}")
+
         data_rifa = obtener_data_completa()
         rifa = data_rifa["numeros"]
         solicitudes = data_rifa.get("solicitudes_pendientes", {})
@@ -226,7 +221,7 @@ def webhook():
         if sender_id in bloqueados and sender_id != ADMIN_PHONE:
             return jsonify({"status": "blocked"}), 200
 
-        # --- 1. COMANDO LISTA (PRIORIDAD ABSOLUTA) ---
+        # --- 1. COMANDO LISTA ---
         if comando in ["lista", "listas"]:
             texto_lista, menciones_lista = generar_texto_lista()
             respuesta = f"¡Hola {push_name}! Estado actual de LA RIFA:\n\n{texto_lista}"
@@ -253,12 +248,12 @@ def webhook():
                 texto_lista, _ = generar_texto_lista()
                 enviar_whatsapp(sender_id, "🔄 *¡Reseteado con éxito!*:\n\n" + texto_lista)
                 return jsonify({"status": "success"}), 200
- 
+
             elif comando.startswith("conf_") or comando.startswith("rech_"):
                 partes_cb = comando.split("_", 1)
                 accion = partes_cb[0]
                 req_id = partes_cb[1] if len(partes_cb) > 1 else ""
- 
+
                 if req_id in solicitudes:
                     sol = solicitudes[req_id]
                     user_nombre = sol["nombre"]
@@ -267,14 +262,14 @@ def webhook():
                     chat_origen = sol["chat_origen"]
                     jid_completo = sol["jid_completo"]
                     nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
- 
+
                     if accion == "conf":
                         for n in user_nums:
                             rifa[n]["estado"] = "ocupado"
                             rifa[n]["nombre"] = user_nombre
                             rifa[n]["user_id"] = user_tel
                             rifa[n]["jid_completo"] = jid_completo
- 
+
                         del solicitudes[req_id]
                         data_rifa["numeros"] = rifa
                         data_rifa["solicitudes_pendientes"] = solicitudes
@@ -287,7 +282,7 @@ def webhook():
                     elif accion == "rech":
                         for n in user_nums:
                             rifa[n] = {"estado": "disponible", "nombre": "", "user_id": "", "jid_completo": ""}
- 
+
                         del solicitudes[req_id]
                         data_rifa["numeros"] = rifa
                         data_rifa["solicitudes_pendientes"] = solicitudes
@@ -296,11 +291,11 @@ def webhook():
                         enviar_whatsapp(ADMIN_PHONE, f"❌ Rechazado ID {req_id}")
                         txt_rech = f"❌ Lo sentimos @{user_tel}, tu solicitud fue rechazada."
                         enviar_whatsapp(chat_origen, txt_rech, mencion_jid=jid_completo)
- 
+
                 return jsonify({"status": "success"}), 200
 
-        # --- 4. SELECCIÓN DE NÚMEROS ---
-        partes = [p.strip() for p in mensaje_texto.split(",")]
+        # --- 4. SELECCIÓN DE NÚMEROS (CORREGIDA) ---
+        partes = [p.strip() for p in mensaje_texto.replace(" ", "").split(",") if p.strip()]
         es_lista_numeros = all(p.isdigit() for p in partes) if partes else False
 
         if es_lista_numeros:
@@ -320,7 +315,7 @@ def webhook():
                 req_id = "r" + str(uuid.uuid4().int)[:4]
                 for n in validos_para_reservar:
                     rifa[n]["estado"] = "pendiente"
-                    rifa[n]["nombre"] = push_name
+                    rifa[n]["nombre"] = push_Name = push_name if 'push_name' in locals() else "Usuario"
                     rifa[n]["user_id"] = sender_id
                     rifa[n]["jid_completo"] = sender_full_jid
 
