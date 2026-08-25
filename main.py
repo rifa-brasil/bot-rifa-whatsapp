@@ -129,25 +129,25 @@ def generar_texto_lista():
             texto += f"🟢 *{num_str}*: Disponible\n"
             disponibles += 1
         elif estado == "pendiente":
-            user_id = info.get("user_id", "")
+            user_id = info.get("user_telf", "")
             jid_completo = info.get("jid_completo", "")
             if user_id:
-                texto += f"🟡 *{num_str}*: En verificación de pago (@{user_id})...\n"
+                texto += f"🟡 *{num_str}*: En verificación de pago (@{user_tel})...\n"
                 if jid_completo:
                     menciones_lista.append(jid_completo)
                 else:
-                    menciones_lista.append(f"{user_id}@s.whatsapp.net")
+                    menciones_lista.append(f"{user_telf}@s.whatsapp.net")
             else:
                 texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
-            user_id = info.get("user_id", "")
+            user_telf = info.get("user_telf", "")
             jid_completo = info.get("jid_completo", "")
-            if user_id:
-                texto += f"🔴 *{num_str}*: Ocupado por @{user_id}\n"
+            if user_telf:
+                texto += f"🔴 *{num_str}*: Ocupado por @{user_tel}\n"
                 if jid_completo:
                     menciones_lista.append(jid_completo)
                 else:
-                    menciones_lista.append(f"{user_id}@s.whatsapp.net")
+                    menciones_lista.append(f"{user_telf}@s.whatsapp.net")
             else:
                 nombre = info.get("nombre", "Usuario")
                 texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
@@ -228,7 +228,7 @@ def webhook():
         # --- 1. COMANDO LISTA (PRIORIDAD ABSOLUTA) ---
         if comando in ["lista", "listas"]:
             texto_lista, menciones_lista = generar_texto_lista()
-            respuesta = f"¡Hola {push_name}! Estado actual de LA RIFA:\n\n{texto_lista}"
+            respuesta = f"¡Hola @{user_tel}! Estado actual de LA RIFA:\n\n{texto_lista}"
             if estado_actual_rifa == "activa":
                 respuesta += "\n\n👉 *¿Cómo comprar?* Envía los números que deseas separados por coma (ej: *7, 14*)."
             
@@ -338,12 +338,12 @@ def webhook():
                 nums_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
                 total, promo = calcular_total_promocion(len(validos_para_reservar))
 
-                msg = f"⏳ Hola @{sender_id}, recibimos tu pedido para: *{nums_txt}*.\n💰 Total: ${total:.2f}\n🟡 Quedan temporalmente reservados."
+                msg = f"⏳ Hola @{user_tel}, recibimos tu pedido para: *{nums_txt}*.\n💰 Total: ${total:.2f}\n🟡 Quedan temporalmente reservados."
                 enviar_whatsapp(remote_jid, msg, mencion_jid=sender_full_jid)
 
                 link_ok = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_no = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
-                txt_admin = f"📥 Solicitud `{req_id}` de @{sender_id} para *{nums_txt}* (${total:.2f}).\n👉 APROBAR: {link_ok}\n👉 RECHAZAR: {link_no}"
+                txt_admin = f"📥 Solicitud `{req_id}` de @{user_tel} para *{nums_txt}* (${total:.2f}).\n👉 APROBAR: {link_ok}\n👉 RECHAZAR: {link_no}"
                 enviar_whatsapp(ADMIN_PHONE, txt_admin, mencion_jid=sender_full_jid)
 
             return jsonify({"status": "success"}), 200
