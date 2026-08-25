@@ -1,463 +1,427 @@
 import os
 import json
 import uuid
-import requests
-from flask import Flask, request, jsonify
+import asyncio
+import logging
+from aiohttp import web, ClientSession
 
-# --- CONFIGURACIÓN DE FLASK PARA RENDER ---
-app = Flask(__name__)
-
-# --- TUS DATOS CONFIGURADOS FIJOS ---
+# ============================================
+# CONFIGURACIÓN (TUS DATOS OFICIALES)
+# ============================================
 EVOLUTION_API_URL = "https://mi-whatsapp-api-pobo.onrender.com"
 EVOLUTION_API_KEY = "55725d7c0b0fb17cb5e6564edac38c1f"
 INSTANCE_NAME = "mi-bot"
-ADMIN_PHONE = "5511948824359"  # Tu número de administrador
-BOT_PHONE = "5562993984530"    # Tu número de bot
+ADMIN_PHONE_NUMBER = "5511948824359"
+BOT_PHONE_NUMBER = "5562993984530"
+WEBHOOK_PATH = "/webhook"
 PORT = int(os.environ.get("PORT", 10000))
 
-DB_FILE = "rifa_db.json"
+# Validación básica de configuración
+if not all([EVOLUTION_API_URL, INSTANCE_NAME, ADMIN_PHONE_NUMBER]):
+    print("❌ Error: Faltan variables de entorno.")
+    exit(1)
 
-# --- TABLA DE PRECIOS Y PROMOCIONES POR CANTIDAD ---
-PRECIO_1_NUMERO = 10.0
-PRECIO_2_NUMEROS = 18.0  # Paquete de 2
-PRECIO_3_NUMEROS = 25.0  # Paquete de 3
-PRECIO_4_NUMEROS = 32.0  # Paquete de 4
-PRECIO_5_NUMEROS = 40.0  # Paquete de 5
+# Configuración de logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# ============================================
+# PERSISTENCIA (JSON)
+# ============================================
+DB_FILE = "rifa_db.json"
 
 def inicializar_rifa():
     try:
         if not os.path.exists(DB_FILE):
             data_inicial = {
                 "estado_rifa": "activa",
-                "numeros": {str(i): {"estado": "disponible", "nombre": "", "user_id": "", "jid_completo": ""} for i in range(1, 101)},
-                "solicitudes_pendientes": {},
-                "usuarios_bloqueados": []
+                "numeros": {str(i): {"estado": "disponible", "nombre": "", "user_id": "", "username": ""} for i in range(1, 101)},
+                "solicitudes_pendientes": {}
             }
-            with open(DB_FILE, "w") as f:
-                json.dump(data_inicial, f, indent=4)
+            with open(DB_FILE, "w", encoding="utf-8") as f:
+                json.dump(data_inicial, f, indent=4, ensure_ascii=False)
     except Exception as e:
-        print(f"Error al inicializar JSON: {e}")
+        logger.error(f"Error al inicializar JSON: {e}")
 
 def borrar_y_recrear_base_datos():
     try:
         if os.path.exists(DB_FILE):
             os.remove(DB_FILE)
     except Exception as e:
-        print(f"Error al eliminar archivo: {e}")
+        logger.error(f"Error al eliminar archivo: {e}")
     inicializar_rifa()
 
 def obtener_data_completa():
     inicializar_rifa()
     try:
-        with open(DB_FILE, "r") as f:
+        with open(DB_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-            if "estado_rifa" not in data:
-                data["estado_rifa"] = "activa"
-            if "solicitudes_pendientes" not in data:
-                data["solicitudes_pendientes"] = {}
-            if "usuarios_bloqueados" not in data:
-                data["usuarios_bloqueados"] = []
-            return data
+        if "estado_rifa" not in data:
+            data["estado_rifa"] = "activa"
+        if "solicitudes_pendientes" not in data:
+            data["solicitudes_pendientes"] = {}
+        return data
     except Exception as e:
+        logger.error(f"Error al leer JSON: {e}")
         borrar_y_recrear_base_datos()
-        with open(DB_FILE, "r") as f:
+        with open(DB_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
 
 def guardar_data_completa(data):
     try:
-        with open(DB_FILE, "w") as f:
-            json.dump(data, f, indent=4)
+        with open(DB_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
     except Exception as e:
-        print(f"Error al guardar JSON: {e}")
+        logger.error(f"Error al guardar JSON: {e}")
 
-def enviar_whatsapp(numero, texto, mencion_jid=None):
-    url = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
-    headers = {
-        "apikey": EVOLUTION_API_KEY,
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "number": str(numero).strip(),
-        "text": texto
-    }
-    if mencion_jid:
-        if isinstance(mencion_jid, list):
-            payload["mentioned"] = [m if "@" in m else f"{m}@s.whatsapp.net" for m in mencion_jid]
-        else:
-            if "@" not in mencion_jid:
-                mencion_jid = f"{mencion_jid}@s.whatsapp.net"
-            payload["mentioned"] = [mencion_jid]
+# ============================================
+# LÓGICA DE NEGOCIO
+# ============================================
+VALOR_POR_NUMERO = 10
 
-    try:
-        response = requests.post(url, json=payload, headers=headers)
-        return response.json()
-    except Exception as e:
-        print(f"Error enviando WhatsApp a {numero}: {e}")
-        return None
+def calcular_premio_total():
+    recaudacion_total = 100 * VALOR_POR_NUMERO
+    premio = recaudacion_total * 0.55
+    return int(premio) if premio.is_integer() else round(premio, 2)
 
-def calcular_total_promocion(cantidad):
+def calcular_precio_total(cantidad, usuario_ya_tiene_compras=False):
     if cantidad <= 0:
-        return 0.0, "Sin números"
-    elif cantidad == 1:
-        return PRECIO_1_NUMERO, "Precio estándar (1 número)"
-    elif cantidad == 2:
-        return PRECIO_2_NUMEROS, "¡Promoción aplicada por 2 números!"
-    elif cantidad == 3:
-        return PRECIO_3_NUMEROS, "¡Promoción aplicada por 3 números!"
+        return 0
+    if usuario_ya_tiene_compras:
+        return cantidad * VALOR_POR_NUMERO
+
+    p5 = int(VALOR_POR_NUMERO * 4)
+    p4 = int(VALOR_POR_NUMERO * 3.5)
+    p3 = int(VALOR_POR_NUMERO * 2.5)
+    p2 = int(VALOR_POR_NUMERO * 1.5)
+    p1 = VALOR_POR_NUMERO
+
+    if cantidad >= 5:
+        return p5
     elif cantidad == 4:
-        return PRECIO_4_NUMEROS, "¡Promoción aplicada por 4 números!"
-    elif cantidad == 5:
-        return PRECIO_5_NUMEROS, "¡Promoción aplicada por 5 números (Súper Paquete)!"
+        return p4
+    elif cantidad == 3:
+        return p3
+    elif cantidad == 2:
+        return p2
     else:
-        adicionales = cantidad - 5
-        total = PRECIO_5_NUMEROS + (adicionales * PRECIO_1_NUMERO)
-        return total, f"¡Paquete de 5 + {adicionales} número(s) adicional(es)!"
+        return p1
+
+def usuario_tiene_jugada_previa(user_id, data_completa):
+    rifa = data_completa.get("numeros", {})
+    solicitudes = data_completa.get("solicitudes_pendientes", {})
+    for num_str, info in rifa.items():
+        if info.get("user_id") == user_id and info.get("estado") in ["ocupado", "pendiente"]:
+            return True
+    for req_id, sol in solicitudes.items():
+        if sol.get("user_id") == user_id:
+            return True
+    return False
 
 def generar_texto_lista():
     data = obtener_data_completa()
     rifa = data["numeros"]
-    texto = "🎟️ *LISTA OFICIAL DE LA RIFA* 🎟️\n\n"
+    texto = "📋 *LISTA OFICIAL DE LA RIFA (1 al 100)* 📋\n\n"
     disponibles = 0
-    menciones_lista = []
-    
     for i in range(1, 101):
         num_str = str(i).zfill(2)
         info = rifa[str(i)]
         estado = info.get("estado", "disponible")
-
         if estado == "disponible":
-            texto += f"🟢 *{num_str}*: Disponible\n"
+            texto += f"🔓 *{num_str}*: Disponible\n"
             disponibles += 1
         elif estado == "pendiente":
-            user_id = info.get("user_id", "")
-            jid_completo = info.get("jid_completo", "")
-            if user_id and jid_completo:
-                texto += f"🟡 *{num_str}*: En verificación de pago (@{user_id})...\n"
-                menciones_lista.append(jid_completo)
-            else:
-                texto += f"🟡 *{num_str}*: En verificación de pago...\n"
+            texto += f"⏳ *{num_str}*: En verificación de pago...\n"
         else:
-            user_id = info.get("user_id", "")
-            jid_completo = info.get("jid_completo", "")
-            if user_id and jid_completo:
-                texto += f"🔴 *{num_str}*: Ocupado por @{user_id}\n"
-                menciones_lista.append(jid_completo)
-            else:
-                nombre = info.get("nombre", "Usuario")
-                texto += f"🔴 *{num_str}*: Ocupado por {nombre}\n"
-            
+            nombre = info.get("nombre", "Usuario")
+            texto += f"🔒 *{num_str}*: Ocupado por {nombre}\n"
     texto += f"\n📊 *Resumen:* Quedan {disponibles} números disponibles."
-    if data.get("estado_rifa") == "finalizada":
-        texto += "\n\n🔒 *ESTADO:* RIFA cerrada/finalizada."
-    return texto, menciones_lista
+    estado_actual = data.get("estado_rifa")
+    if estado_actual == "finalizada":
+        texto += "\n\n🔒 *ESTADO:* Rifa cerrada/finalizada."
+    elif estado_actual == "bloqueada":
+        texto += "\n\n⛔ *ESTADO:* Rifa temporalmente bloqueada por el administrador."
+    return texto
 
-@app.route("/", methods=["GET"])
-def index():
-    return "Bot de LA RIFA para WhatsApp Activo y en Línea 24/7!", 200
+def obtener_texto_reglas():
+    premio_actual = calcular_premio_total()
+    return (
+        "📜 *REGLAS Y DINÁMICA DEL GRUPO (Gran Sorteo 100):*\n\n"
+        "1️⃣ *Respeto:* Mantén un ambiente de respeto absoluto.\n"
+        "2️⃣ *Números y Promoción:* Disponemos de 100 números (del 01 al 100).\n"
+        f"✨ *Valores para tu primera jugada (Promoción):*\n"
+        f"• 1 número = *{VALOR_POR_NUMERO} reales*\n"
+        f"• 2 números = *{int(VALOR_POR_NUMERO * 1.5)} reales*\n"
+        f"• 3 números = *{int(VALOR_POR_NUMERO * 2.5)} reales*\n"
+        f"• 4 números = *{int(VALOR_POR_NUMERO * 3.5)} reales*\n"
+        f"• 5 números = *{int(VALOR_POR_NUMERO * 4)} reales*\n\n"
+        f"Envía la palabra `lista` para ver los disponibles y escribe los que deseas separados por coma (ej: *7, 14*).\n"
+        f"3️⃣ *Premio:* El usuario ganador recibirá un premio de *{premio_actual} reales*.\n"
+        "4️⃣ *Transparencia:* Definido con la Lotería de Florida (Pick 3)."
+    )
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    data = request.get_json()
-    if not data:
-        return jsonify({"status": "error"}), 400
-
+# ============================================
+# ENVÍO DE MENSAJES (Evolution API)
+# ============================================
+async def send_whatsapp_message(chat_id, text):
+    url = f"{EVOLUTION_API_URL}/message/sendText/{INSTANCE_NAME}"
+    headers = {
+        "Content-Type": "application/json",
+        "apikey": EVOLUTION_API_KEY
+    }
+    payload = {
+        "number": chat_id,
+        "text": text
+    }
     try:
+        async with ClientSession() as session:
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status != 200:
+                    logger.error(f"Error al enviar mensaje a {chat_id}: {resp.status} - {await resp.text()}")
+                else:
+                    logger.info(f"Mensaje enviado con éxito a {chat_id}")
+    except Exception as e:
+        logger.error(f"Excepción enviando mensaje: {e}")
+
+# ============================================
+# MANEJADOR DE COMANDOS Y MENSAJES
+# ============================================
+async def handle_message(data):
+    try:
+        logger.info(f"Estructura recibida: {json.dumps(data, indent=2)}")
+        
         event = data.get("event")
         if event != "messages.upsert":
-            return jsonify({"status": "ignored"}), 200
+            return
 
-        msg_data = data.get("data", {})
+        event_data = data.get("data", {})
         
-        if msg_data.get("key", {}).get("fromMe", False):
-            return jsonify({"status": "ignored"}), 200
+        if event_data.get("key", {}).get("fromMe", False):
+            return
 
-        remote_jid = msg_data.get("key", {}).get("remoteJid", "")
-        is_group = "@g.us" in remote_jid
-        
+        remote_jid = event_data.get("key", {}).get("remoteJid", "")
+        participant_alt = event_data.get("key", {}).get("participantAlt", "")
+        participant_jid = event_data.get("key", {}).get("participant", "")
+        push_name = event_data.get("pushName", "Participante")
+
+        is_group = remote_jid.endswith("@g.us")
+
         if is_group:
-            sender_full_jid = msg_data.get("participant", "") or msg_data.get("key", {}).get("participant", "")
+            chat_id = remote_jid
+            # Priorizamos participantAlt para obtener el número real si viene por LID
+            if participant_alt:
+                sender_phone = participant_alt.split("@")[0]
+            elif participant_jid:
+                sender_phone = participant_jid.split("@")[0]
+            else:
+                sender_phone = remote_jid.split("@")[0]
         else:
-            sender_full_jid = remote_jid
+            chat_id = remote_jid.split("@")[0]
+            sender_phone = chat_id
 
-        if not sender_full_jid:
-            sender_full_jid = remote_jid
+        if sender_phone == BOT_PHONE_NUMBER:
+            return
 
-        sender_id = sender_full_jid.split("@")[0].split(":")[0]
+        message_content = event_data.get("message", {})
+        message_text = (
+            message_content.get("conversation") or
+            message_content.get("extendedTextMessage", {}).get("text") or ""
+        ).strip()
 
-        message_content = msg_data.get("message", {})
-        mensaje_texto = ""
-        if "conversation" in message_content:
-            mensaje_texto = message_content["conversation"]
-        elif "extendedTextMessage" in message_content:
-            mensaje_texto = message_content["extendedTextMessage"].get("text", "")
+        if not message_text:
+            return
 
-        if not mensaje_texto:
-            return jsonify({"status": "no_text"}), 200
-
-        mensaje_texto = mensaje_texto.strip()
-        comando = mensaje_texto.lower()
-        push_name = msg_data.get("pushName", "Usuario")
-
+        text_lower = message_text.lower()
         data_rifa = obtener_data_completa()
-        rifa = data_rifa["numeros"]
-        solicitudes = data_rifa.get("solicitudes_pendientes", {})
-        bloqueados = data_rifa.get("usuarios_bloqueados", [])
-        estado_actual_rifa = data_rifa.get("estado_rifa", "activa")
 
-        if sender_id in bloqueados and sender_id != ADMIN_PHONE:
-            return jsonify({"status": "blocked"}), 200
+        if text_lower.startswith("/"):
+            parts = message_text.split()
+            command = parts[0].lower()
 
-        # --- COMANDOS DE ADMINISTRADOR ---
-        if sender_id == ADMIN_PHONE:
-            if comando.startswith("/reset"):
-                borrar_y_recrear_base_datos()
-                texto_lista, _ = generar_texto_lista()
-                enviar_whatsapp(sender_id, "🔄 *¡LA RIFA ha sido reseteado con éxito!* Todos los números vuelven a estar disponibles.\n\n" + texto_lista)
-                return jsonify({"status": "success"}), 200
+            if command == "/start" or command == "/lista" or text_lower == "lista":
+                await send_whatsapp_message(chat_id, f"Estado actual de la Rifa:\n\n{generar_texto_lista()}")
+                return
 
-            elif comando.startswith("/ganador"):
-                partes_cmd = comando.split(" ")
-                if len(partes_cmd) < 2:
-                    enviar_whatsapp(sender_id, "⚠️ Por favor indica el número ganador. Ejemplo: `/ganador 14`")
-                    return jsonify({"status": "success"}), 200
+            if command == "/reglas":
+                await send_whatsapp_message(chat_id, obtener_texto_reglas())
+                return
+
+            if sender_phone != ADMIN_PHONE_NUMBER:
+                await send_whatsapp_message(chat_id, "⛔ No estás autorizado para este comando.")
+                return
+
+            if command == "/confirmar":
+                if len(parts) < 2:
+                    await send_whatsapp_message(chat_id, "⚠️ Uso: `/confirmar <ID>`")
+                    return
+                req_id = parts[1].strip()
+                solicitudes = data_rifa.get("solicitudes_pendientes", {})
+                if req_id not in solicitudes:
+                    await send_whatsapp_message(chat_id, f"⚠️ La solicitud `{req_id}` no existe.")
+                    return
                 
-                num_ingresado = partes_cmd[1].strip()
-                if not num_ingresado.isdigit() or not (1 <= int(num_ingresado) <= 100):
-                    enviar_whatsapp(sender_id, "⚠️ El número debe estar entre 1 y 100.")
-                    return jsonify({"status": "success"}), 200
+                sol = solicitudes[req_id]
+                u_id = sol["user_id"]
+                u_nums = sol["numeros"]
+                u_nombre = sol["nombre"]
+                chat_origen = sol["chat_origen"]
+                nums_fmt = ", ".join([n.zfill(2) for n in u_nums])
 
-                num_str = str(int(num_ingresado))
-                info_num = rifa.get(num_str, {})
-                estado = info_num.get("estado")
+                rifa = data_rifa["numeros"]
+                for n in u_nums:
+                    rifa[n]["estado"] = "ocupado"
+                    rifa[n]["nombre"] = u_nombre
+                    rifa[n]["user_id"] = u_id
 
-                if estado != "ocupado":
-                    enviar_whatsapp(sender_id, f"⚠️ El número *{num_ingresado.zfill(2)}* no está ocupado.")
-                    return jsonify({"status": "success"}), 200
+                del solicitudes[req_id]
+                guardar_data_completa(data_rifa)
 
-                ganador_tel = info_num.get("user_id")
-                ganador_jid = info_num.get("jid_completo")
-                num_formateado = num_str.zfill(2)
+                await send_whatsapp_message(chat_id, f"✅ Solicitud {req_id} APROBADA.")
+                
+                msj_exito = f"🎉 *¡PAGO CONFIRMADO!* 🎉\n\n👤 *Usuario:* {u_nombre}\n📋 *Números asignados:* {nums_fmt}\n¡Felicidades! 🙌"
+                await send_whatsapp_message(chat_origen, msj_exito)
+                if chat_origen != u_id:
+                    await send_whatsapp_message(u_id, msj_exito)
+                return
 
-                msg_anuncio = (
-                    f"🏆 *¡RESULTADO OFICIAL DE LA RIFA!* 🏆\n\n"
-                    f"🎯 El Resultado de la Florida Pick 3 es el: *{num_formateado}*\n\n"
-                    f"🎉 ¡El usuario @{ganador_tel} es el ganador de este número! Muchas felicidades. 🥳"
-                )
-                enviar_whatsapp(remote_jid, msg_anuncio, mencion_jid=ganador_jid)
+            if command == "/rechazar":
+                if len(parts) < 2:
+                    await send_whatsapp_message(chat_id, "⚠️ Uso: `/rechazar <ID>`")
+                    return
+                req_id = parts[1].strip()
+                solicitudes = data_rifa.get("solicitudes_pendientes", {})
+                if req_id not in solicitudes:
+                    await send_whatsapp_message(chat_id, f"⚠️ La solicitud `{req_id}` no existe.")
+                    return
 
-                if ganador_jid:
-                    msg_privado = (
-                        f"🎉 *¡FELICIDADES!* 🎉\n\n"
-                        f"¡Has ganado LA RIFA con tu número *{num_formateado}*! 🏆\n\n"
-                        f"Por favor, ponte en contacto con la administración para recibir tu premio. 🤝"
-                    )
-                    enviar_whatsapp(ganador_tel, msg_privado)
-                return jsonify({"status": "success"}), 200
+                sol = solicitudes[req_id]
+                u_id = sol["user_id"]
+                u_nums = sol["numeros"]
+                nums_fmt = ", ".join([n.zfill(2) for n in u_nums])
 
-            elif comando.startswith("/liberar"):
-                partes_cmd = comando.split(" ")
-                if len(partes_cmd) > 1:
-                    num_lib = partes_cmd[1].strip()
-                    if num_lib.isdigit() and 1 <= int(num_lib) <= 100:
-                        n_str = str(int(num_lib))
-                        rifa[n_str] = {"estado": "disponible", "nombre": "", "user_id": "", "jid_completo": ""}
-                        data_rifa["numeros"] = rifa
-                        guardar_data_completa(data_rifa)
-                        enviar_whatsapp(sender_id, f"🟢 El número {n_str.zfill(2)} ha sido liberado.")
-                return jsonify({"status": "success"}), 200
+                rifa = data_rifa["numeros"]
+                for n in u_nums:
+                    rifa[n] = {"estado": "disponible", "nombre": "", "user_id": "", "username": ""}
 
-            elif comando.startswith("conf_") or comando.startswith("rech_"):
-                partes_cb = comando.split("_", 1)
-                accion = partes_cb[0]
-                req_id = partes_cb[1] if len(partes_cb) > 1 else ""
+                del solicitudes[req_id]
+                guardar_data_completa(data_rifa)
 
-                if req_id in solicitudes:
-                    sol = solicitudes[req_id]
-                    user_nombre = sol["nombre"]
-                    user_tel = sol["user_id"]
-                    user_nums = sol["numeros"]
-                    chat_origen = sol["chat_origen"]
-                    jid_completo = sol["jid_completo"]
-                    nums_formatted = ", ".join([n.zfill(2) for n in user_nums])
+                await send_whatsapp_message(chat_id, f"❌ Solicitud {req_id} RECHAZADA y números liberados.")
+                await send_whatsapp_message(u_id, f"❌ Tu solicitud para los números *{nums_fmt}* fue rechazada.")
+                return
 
-                    if accion == "conf":
-                        for n in user_nums:
-                            rifa[n]["estado"] = "ocupado"
-                            rifa[n]["nombre"] = user_nombre
-                            rifa[n]["user_id"] = user_tel
-                            rifa[n]["jid_completo"] = jid_completo
+            if command == "/reset":
+                borrar_y_recrear_base_datos()
+                await send_whatsapp_message(chat_id, f"🔄 Rifa reseteada.\n\n{generar_texto_lista()}")
+                return
 
-                        del solicitudes[req_id]
-                        data_rifa["numeros"] = rifa
-                        data_rifa["solicitudes_pendientes"] = solicitudes
+        partes = [p.strip() for p in message_text.split(",")]
+        es_lista = all(p.isdigit() for p in partes) if partes else False
 
-                        if all(rifa[str(n)]["estado"] == "ocupado" for n in range(1, 101)):
-                            data_rifa["estado_rifa"] = "finalizada"
+        if es_lista:
+            estado_rifa = data_rifa.get("estado_rifa", "activa")
+            if estado_rifa in ["finalizada", "bloqueada"]:
+                await send_whatsapp_message(chat_id, "⛔ La lista está cerrada o bloqueada.")
+                return
 
-                        guardar_data_completa(data_rifa)
-                        enviar_whatsapp(sender_id, f"✅ *Aprobado.* Números: {nums_formatted}")
-
-                        texto_pago_confirmado = (
-                            f"🎉 *¡Hola @{user_tel}!* 🎉\n\n"
-                            f"Tu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre."
-                        )
-
-                        try:
-                            enviar_whatsapp(user_tel, texto_pago_confirmado, mencion_jid=jid_completo)
-                        except Exception as e:
-                            print(f"Error enviando confirmación al privado: {e}")
-
-                        try:
-                            if chat_origen != user_tel:
-                                enviar_whatsapp(chat_origen, texto_pago_confirmado, mencion_jid=jid_completo)
-                        except Exception as e:
-                            print(f"Error enviando confirmación al grupo: {e}")
-
-                    elif accion == "rech":
-                        for n in user_nums:
-                            rifa[n] = {"estado": "disponible", "nombre": "", "user_id": "", "jid_completo": ""}
-
-                        del solicitudes[req_id]
-                        data_rifa["numeros"] = rifa
-                        data_rifa["solicitudes_pendientes"] = solicitudes
-                        guardar_data_completa(data_rifa)
-                        enviar_whatsapp(sender_id, f"❌ *Rechazado el ID {req_id}.*")
-                        
-                        texto_rechazo = f"❌ Lo sentimos @{user_tel}, tu solicitud para los números *{nums_formatted}* fue rechazada. Los números vuelven a estar disponibles."
-                        
-                        try:
-                            enviar_whatsapp(user_tel, texto_rechazo, mencion_jid=jid_completo)
-                        except Exception as e:
-                            print(f"Error notificando rechazo al privado: {e}")
-
-                        try:
-                            if chat_origen != user_tel:
-                                enviar_whatsapp(chat_origen, texto_rechazo, mencion_jid=jid_completo)
-                        except Exception as e:
-                            print(f"Error notificando rechazo al grupo: {e}")
-
-                return jsonify({"status": "success"}), 200
-
-        # --- COMANDOS GENERALES Y CONSULTAS ---
-        if comando in ["lista"]:
-            texto_lista, menciones_lista = generar_texto_lista()
-            respuesta = f"¡Hola {push_name}! Estado actual de LA RIFA:\n\n{texto_lista}"
-            if estado_actual_rifa == "activa":
-                respuesta += "\n\n👉 *¿Cómo comprar?* Envía los números que deseas separados por coma (ej: *7, 14*)."
-            
-            enviar_whatsapp(remote_jid, respuesta, mencion_jid=menciones_lista if menciones_lista else None)
-            return jsonify({"status": "success"}), 200
-
-        elif comando == "/reglas":
-            texto_reglas = (
-                f"📌 *Reglas de LA RIFA:*\n"
-                f"1. Escribe `lista` para ver los números disponibles (del 01 al 100).\n"
-                f"2. Envía los números que deseas separados por comas (ejemplo: `7, 14`).\n"
-                f"3. Revisa el total calculado con promoción y haz tu transferencia.\n"
-                f"4. El ganador se define mediante la Lotería de Florida."
-            )
-            enviar_whatsapp(remote_jid, texto_reglas)
-            return jsonify({"status": "success"}), 200
-
-        # --- PROCESAMIENTO DE SELECCIÓN DE NÚMEROS ---
-        partes = [p.strip() for p in mensaje_texto.split(",")]
-        es_lista_numeros = all(p.isdigit() for p in partes) if partes else False
-
-        if es_lista_numeros:
-            if estado_actual_rifa == "finalizada":
-                enviar_whatsapp(remote_jid, "🔒 *Lo sentimos, el sistema está cerrado.*")
-                return jsonify({"status": "success"}), 200
-
-            ocupados, pendientes, validos_para_reservar, invalidos = [], [], [], []
+            rifa = data_rifa["numeros"]
+            solicitudes = data_rifa.get("solicitudes_pendientes", {})
+            ocupados, pendientes, validos, invalidos = [], [], [], []
 
             for p in partes:
-                num_elegido = int(p)
-                if 1 <= num_elegido <= 100:
-                    num_str = str(num_elegido)
-                    info = rifa[num_str]
-                    est = info.get("estado", "disponible")
-
+                num_int = int(p)
+                if 1 <= num_int <= 100:
+                    num_str = str(num_int)
+                    est = rifa[num_str].get("estado", "disponible")
                     if est == "ocupado":
-                        ocupados.append(f"*{num_str.zfill(2)}*")
+                        ocupados.append(num_str.zfill(2))
                     elif est == "pendiente":
-                        pendientes.append(f"*{num_str.zfill(2)}*")
+                        pendientes.append(num_str.zfill(2))
                     else:
-                        validos_para_reservar.append(num_str)
+                        validos.append(num_str)
                 else:
                     invalidos.append(p)
 
-            mensajes_conflicto = []
-            if ocupados:
-                mensajes_conflicto.append(f"🔴 El/los número(s) {', '.join(ocupados)} ya está(n) *OCUPADO(S)*.")
-            if pendientes:
-                mensajes_conflicto.append(f"🟡 El/los número(s) {', '.join(pendientes)} está(n) *EN PROCESO DE VERIFICACIÓN*.")
-            if invalidos:
-                mensajes_conflicto.append(f"⚠️ El/los número(s) {', '.join(invalidos)} está(n) fuera del rango (1 al 100).")
+            if (ocupados or pendientes or invalidos) and not validos:
+                await send_whatsapp_message(chat_id, "⚠️ Los números seleccionados no están disponibles o están fuera de rango.")
+                return
 
-            if mensajes_conflicto and not validos_para_reservar:
-                enviar_whatsapp(remote_jid, f"Hola {push_name}:\n" + "\n".join(mensajes_conflicto))
-                return jsonify({"status": "success"}), 200
-
-            if validos_para_reservar:
+            if validos:
+                ya_tiene = usuario_tiene_jugada_previa(sender_phone, data_rifa)
                 req_id = "r" + str(uuid.uuid4().int)[:4]
 
-                for n in validos_para_reservar:
+                for n in validos:
                     rifa[n]["estado"] = "pendiente"
-                    rifa[n]["nombre"] = push_name
-                    rifa[n]["user_id"] = sender_id
-                    rifa[n]["jid_completo"] = sender_full_jid
 
                 solicitudes[req_id] = {
                     "nombre": push_name,
-                    "user_id": sender_id,
-                    "jid_completo": sender_full_jid,
-                    "numeros": validos_para_reservar,
-                    "chat_origen": remote_jid
+                    "user_id": sender_phone,
+                    "numeros": validos,
+                    "chat_origen": chat_id
                 }
 
                 data_rifa["numeros"] = rifa
                 data_rifa["solicitudes_pendientes"] = solicitudes
                 guardar_data_completa(data_rifa)
 
-                nums_solicitados_txt = ", ".join([n.zfill(2) for n in validos_para_reservar])
-                cantidad_nums = len(validos_para_reservar)
-                total_a_pagar, promo_txt = calcular_total_promocion(cantidad_nums)
+                nums_txt = ", ".join([n.zfill(2) for n in validos])
+                cant = len(validos)
+                total = calcular_precio_total(cant, usuario_ya_tiene_compras=ya_tiene)
 
-                msg_cliente = (
-                    f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
-                    f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
-                    f"💰 *Total a transferir:* ${total_a_pagar:.2f}\n"
+                msj_usr = (
+                    f"⏳ *SOLICITUD EN PROCESO* ⏳\n\n"
+                    f"Hola *{push_name}*, tus números (*{nums_txt}*) están reservados temporalmente.\n"
+                    f"💵 Total a transferir: *{total} reales*\n\n"
+                    f"Envía tu comprobante al administrador."
                 )
-                if promo_txt:
-                    msg_cliente += f"🔥 *Promoción:* {promo_txt}\n"
-                
-                msg_cliente += f"\n🟡 Quedan *reservados temporalmente* mientras el administrador verifica tu pago."
+                await send_whatsapp_message(chat_id, msj_usr)
 
-                enviar_whatsapp(remote_jid, msg_cliente, mencion_jid=sender_full_jid)
-
-                link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
-                link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
-
-                txt_admin = (
-                    f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* {push_name} (@{sender_id})\n"
-                    f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
-                    f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
-                    f"Haz clic para gestionar:\n"
-                    f"👉 *APROBAR:* {link_aprobar}\n\n"
-                    f"👉 *RECHAZAR:* {link_rechazar}"
+                msj_admin = (
+                    f"📩 *NUEVA SOLICITUD* (ID: `{req_id}`)\n\n"
+                    f"👤 *Cliente:* {push_name} ({sender_phone})\n"
+                    f"📋 *Números:* *{nums_txt}*\n"
+                    f"💰 *Total:* *{total} reales*\n\n"
+                    f"Aprobar: `/confirmar {req_id}`\n"
+                    f"Rechazar: `/rechazar {req_id}`"
                 )
-                
-                enviar_whatsapp(ADMIN_PHONE, txt_admin, mencion_jid=sender_full_jid)
-
-            return jsonify({"status": "success"}), 200
-
-        return jsonify({"status": "ignored_text"}), 200
+                await send_whatsapp_message(ADMIN_PHONE_NUMBER, msj_admin)
 
     except Exception as e:
-        print(f"Error procesando webhook: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+        logger.error(f"Error procesando mensaje: {e}")
+
+# ============================================
+# SERVIDOR WEB
+# ============================================
+async def handle_webhook(request):
+    try:
+        data = await request.json()
+        asyncio.create_task(handle_message(data))
+        return web.Response(text="OK", status=200)
+    except Exception as e:
+        logger.error(f"Error en webhook: {e}")
+        return web.Response(text="Error", status=500)
+
+async def handle_health(request):
+    return web.Response(text="Bot de Rifa WhatsApp Activo 24/7!")
+
+async def start_web_server():
+    app = web.Application()
+    ruta_webhook = f"/{WEBHOOK_PATH.lstrip('/')}"
+    app.router.add_post(ruta_webhook, handle_webhook)
+    app.router.add_get("/", handle_health)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "0.0.0.0", PORT)
+    await site.start()
+    logger.info(f"🚀 Servidor web corriendo en el puerto {PORT}")
+
+async def main():
+    inicializar_rifa()
+    await start_web_server()
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    inicializar_rifa()
-    app.run(host="0.0.0.0", port=PORT)
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Bot detenido correctamente.")
