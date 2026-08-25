@@ -438,10 +438,10 @@ def webhook():
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
  
-                # --- CAMBIO APLICADO: SOLO MUESTRA EL NOMBRE CON ARROBA INTERACTIVO ---
+                # --- FORMATO IDÉNTICO AL QUE SE MUESTRA EN EL GRUPO ---
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* @{user_tel}!* 🎉\n\n"
+                    f"👤 *Cliente:* @{sender_id}\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
