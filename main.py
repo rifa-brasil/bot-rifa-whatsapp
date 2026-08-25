@@ -353,8 +353,8 @@ def webhook():
                 f"📌 *Reglas de LA RIFA:*\n"
                 f"1. Escribe `lista` para ver los números disponibles (del 01 al 100).\n"
                 f"2. Envía los números que deseas separados por comas (ejemplo: `7, 14`).\n"
-                f"3. Revisa el total calculado con promoción y haz tu transferencia.\n"
-                f"4. El ganador se define mediante la Lotería de Florida."
+                f"3. Revisa el total calculado con promoción, haz tu transferencia y envía comprobante al admin.\n"
+                f"4. El ganador se define mediante la Lotería de Florida en el resultado del Pick3."
             )
             enviar_whatsapp(remote_jid, texto_reglas)
             return jsonify({"status": "success"}), 200
@@ -440,7 +440,7 @@ def webhook():
  
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* {push_name} (@{sender_id})\n"
+                    f"👤 *Cliente:* @{user_tel (@{user_tel)\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
