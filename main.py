@@ -131,19 +131,16 @@ def generar_texto_lista():
         elif estado == "pendiente":
             user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
-            nombre_cliente = info.get("nombre", "Usuario")
             if user_id and jid_completo:
-                # Mostramos el nombre real y mantenemos la mención interactiva mediante el JID
-                texto += f"🟡 *{num_str}*: En verificación de pago ({nombre_cliente} - @{user_id})...\n"
+                texto += f"🟡 *{num_str}*: En verificación de pago (@{user_id})...\n"
                 menciones_lista.append(jid_completo)
             else:
                 texto += f"🟡 *{num_str}*: En verificación de pago...\n"
         else:
             user_id = info.get("user_id", "")
             jid_completo = info.get("jid_completo", "")
-            nombre_cliente = info.get("nombre", "Usuario")
             if user_id and jid_completo:
-                texto += f"🔴 *{num_str}*: Ocupado por {nombre_cliente} (@{user_id})\n"
+                texto += f"🔴 *{num_str}*: Ocupado por @{user_id}\n"
                 menciones_lista.append(jid_completo)
             else:
                 nombre = info.get("nombre", "Usuario")
@@ -234,18 +231,17 @@ def webhook():
                 estado = info_num.get("estado")
  
                 if estado != "ocupado":
-                    enviar_whatsapp(sender_id, f"⚠️ El número *{num_ingresado.zfill(2)}* no está ocupado.")
+                    enviar_whatsapp(sender_id, f"⚠️ El número *{num_ingresado.zfill(2)}* não está ocupado.")
                     return jsonify({"status": "success"}), 200
  
                 ganador_tel = info_num.get("user_id")
                 ganador_jid = info_num.get("jid_completo")
-                ganador_nombre = info_num.get("nombre", "Usuario")
                 num_formateado = num_str.zfill(2)
  
                 msg_anuncio = (
                     f"🏆 *¡RESULTADO OFICIAL DE LA RIFA!* 🏆\n\n"
                     f"🎯 El Resultado de la Florida Pick 3 es el: *{num_formateado}*\n\n"
-                    f"🎉 ¡El usuario {ganador_nombre} (@{ganador_tel}) es el ganador de este número! Muchas felicidades. 🥳"
+                    f"🎉 ¡El usuario @{ganador_tel} es el ganador de este número! Muchas felicidades. 🥳"
                 )
                 enviar_whatsapp(remote_jid, msg_anuncio, mencion_jid=ganador_jid)
  
@@ -302,7 +298,7 @@ def webhook():
                         enviar_whatsapp(sender_id, f"✅ *Aprobado.* Números: {nums_formatted}")
  
                         texto_pago_confirmado = (
-                            f"🎉 *¡Hola {user_nombre}!* 🎉\n\n"
+                            f"🎉 *¡Hola @{user_tel}!* 🎉\n\n"
                             f"Tu pago fue verificado. Tus números *({nums_formatted})* ya están registrados a tu nombre."
                         )
  
@@ -327,7 +323,7 @@ def webhook():
                         guardar_data_completa(data_rifa)
                         enviar_whatsapp(sender_id, f"❌ *Rechazado el ID {req_id}.*")
                          
-                        texto_rechazo = f"❌ Lo sentimos {user_nombre}, tu solicitud para los números *{nums_formatted}* fue rechazada. Los números vuelven a estar disponibles."
+                        texto_rechazo = f"❌ Lo sentimos @{user_tel}, tu solicitud para los números *{nums_formatted}* fue rechazada. Los números vuelven a estar disponibles."
                          
                         try:
                             enviar_whatsapp(user_tel, texto_rechazo, mencion_jid=jid_completo)
@@ -429,7 +425,7 @@ def webhook():
  
                 msg_cliente = (
                     f"⏳ *SOLICITUD RECIBIDA* ⏳\n\n"
-                    f"Hola {push_name}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
+                    f"Hola @{sender_id}, recibimos tu pedido para el/los número(s): *{nums_solicitados_txt}*.\n\n"
                     f"💰 *Total a transferir:* ${total_a_pagar:.2f}\n"
                 )
                 if promo_txt:
@@ -442,10 +438,11 @@ def webhook():
                 link_aprobar = f"https://wa.me/{BOT_PHONE}?text=conf_{req_id}"
                 link_rechazar = f"https://wa.me/{BOT_PHONE}?text=rech_{req_id}"
  
-                # --- SOLUCIÓN DEFINITIVA: MUESTRA EL NOMBRE REAL Y LA MENCIÓN INTERACTIVA ---
+                # --- DISEÑO PERFECTO: NOMBRE CLARO Y MENCIÓN INTERACTIVA EN VERDE ---
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
-                    f"👤 *Cliente:* {push_name} (@{sender_id})\n"
+                    f"👤 *Cliente:* {push_name}\n"
+                    f"🔗 *Contacto:* @{sender_id}\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
