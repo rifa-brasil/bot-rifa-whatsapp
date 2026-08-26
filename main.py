@@ -442,7 +442,7 @@ def webhook():
                 txt_admin = (
                     f"📥 *NUEVA SOLICITUD DE COMPRA* (ID: `{req_id}`)\n\n"
                     f"👤 *Cliente:* {push_name}\n"
-                    f"🔗 *Contacto:* @{sender_id}\n"
+                    f"🔗 *Contacto:* @{user_tel}\n"
                     f"🎟️ *Números:* *{nums_solicitados_txt}* ({cantidad_nums} nums)\n"
                     f"💰 *Total Calculado:* ${total_a_pagar:.2f}\n\n"
                     f"Haz clic para gestionar:\n"
